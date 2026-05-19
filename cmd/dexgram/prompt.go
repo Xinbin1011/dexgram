@@ -73,7 +73,7 @@ func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, m
 		}
 		a.syncTelegramPromptTranscript(chatID, messageThreadID, replyMessageID, session.threadID, displayText)
 		a.beginSessionStartingTurn(key, session)
-		turnID, err = startTurn(ctx, session.client, session.threadID, telegramPromptInput(input), opts)
+		turnID, err = startTurn(ctx, session.client, session.threadID, input, opts)
 		if err != nil {
 			a.endSessionStartingTurn(key, session)
 			log.Printf("codex turn start failed: %v", err)
