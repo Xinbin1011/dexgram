@@ -19,6 +19,7 @@ import (
 const (
 	desktopMirrorReconcileInterval = 15 * time.Second
 	desktopMirrorFallbackInterval  = 30 * time.Second
+	desktopMirrorActiveWindow      = 6 * time.Hour
 )
 
 type desktopMirrorHandle struct {
@@ -60,6 +61,9 @@ func (a *app) runDesktopMirrors(ctx context.Context) {
 				continue
 			}
 			key := conversationKey(conv.ChatID, conv.MessageThreadID)
+			if a.activeSession(key) != nil || !desktopMirrorRecentlyActive(conv, time.Now()) {
+				continue
+			}
 			desired[key] = conv
 			if handle, ok := handles[key]; ok && handle.threadID == conv.CodexThreadID {
 				continue
@@ -112,26 +116,6 @@ func (a *app) mirrorConversation(ctx context.Context, key string, conv state.Con
 		log.Printf("desktop mirror removed mapping with missing working dir key=%s thread_id=%s path=%s", key, conv.CodexThreadID, workingDir)
 		return
 	}
-	c, err := codex.StartStdioWithOptions(ctx, codex.StartOptions{
-		CLIPath:    a.cfg.Codex.CLIPath,
-		WorkingDir: workingDir,
-	})
-	if err != nil {
-		log.Printf("start desktop mirror app-server key=%s thread_id=%s: %v", key, conv.CodexThreadID, err)
-		return
-	}
-	defer func() {
-		_ = c.Close()
-	}()
-	go func() {
-		for err := range c.Errors() {
-			log.Printf("codex app-server desktop mirror key=%s: %v", key, err)
-		}
-	}()
-	if err := a.resumeCodexThread(ctx, c, conv.CodexThreadID); err != nil {
-		log.Printf("resume desktop mirror thread key=%s thread_id=%s: %v", key, conv.CodexThreadID, err)
-		return
-	}
 
 	sessionPath, hasSessionPath := codexSessionFilePath(conv.CodexThreadID)
 	if hasSessionPath {
@@ -139,7 +123,7 @@ func (a *app) mirrorConversation(ctx context.Context, key string, conv state.Con
 	} else {
 		log.Printf("desktop mirror session file not found key=%s thread_id=%s; falling back to periodic thread reads", key, conv.CodexThreadID)
 	}
-	lastFallback := time.Now().Add(-desktopMirrorFallbackInterval)
+	lastFallback := time.Now()
 	lastPathLookup := time.Now()
 	sessionState, _ := statSessionFile(sessionPath)
 	watcher, err := newSessionFileWatcher(sessionPath)
@@ -170,7 +154,7 @@ func (a *app) mirrorConversation(ctx context.Context, key string, conv state.Con
 			sessionState = nextState
 			lastFallback = time.Now()
 			var stop bool
-			conv, stop = a.mirrorConversationOnce(ctx, c, key, conv)
+			conv, stop = a.mirrorConversationOnce(ctx, key, conv)
 			if stop {
 				return
 			}
@@ -196,7 +180,7 @@ func (a *app) mirrorConversation(ctx context.Context, key string, conv state.Con
 			if time.Since(lastFallback) >= desktopMirrorFallbackInterval {
 				lastFallback = time.Now()
 				var stop bool
-				conv, stop = a.mirrorConversationOnce(ctx, c, key, conv)
+				conv, stop = a.mirrorConversationOnce(ctx, key, conv)
 				if stop {
 					return
 				}
@@ -205,7 +189,26 @@ func (a *app) mirrorConversation(ctx context.Context, key string, conv state.Con
 	}
 }
 
-func (a *app) mirrorConversationOnce(ctx context.Context, c *codex.Client, key string, conv state.Conversation) (state.Conversation, bool) {
+func (a *app) mirrorConversationOnce(ctx context.Context, key string, conv state.Conversation) (state.Conversation, bool) {
+	if a.activeSession(key) != nil {
+		return conv, false
+	}
+	c, err := a.startCodexAppServer(ctx, codex.StartOptions{
+		CLIPath:    a.cfg.Codex.CLIPath,
+		WorkingDir: appServerWorkingDir(conv),
+	}, "desktop mirror key="+key)
+	if err != nil {
+		log.Printf("start desktop mirror app-server key=%s thread_id=%s: %v", key, conv.CodexThreadID, err)
+		return conv, false
+	}
+	defer func() {
+		_ = c.Close()
+	}()
+	go func() {
+		for err := range c.Errors() {
+			log.Printf("codex app-server desktop mirror key=%s: %v", key, err)
+		}
+	}()
 	updated, err := a.mirrorCompletedDesktopTurns(ctx, c, key, conv)
 	if err != nil {
 		if errors.Is(err, errTelegramTopicGone) {
@@ -219,9 +222,6 @@ func (a *app) mirrorConversationOnce(ctx context.Context, c *codex.Client, key s
 }
 
 func (a *app) mirrorCompletedDesktopTurns(ctx context.Context, c *codex.Client, key string, conv state.Conversation) (state.Conversation, error) {
-	if a.activeSession(key) != nil {
-		return conv, nil
-	}
 	resume, err := a.resumeCodexThreadResult(ctx, c, conv.CodexThreadID)
 	if err != nil {
 		return conv, err
@@ -309,6 +309,26 @@ func (a *app) requestMirrorRefresh() {
 	case a.mirrorRefresh <- struct{}{}:
 	default:
 	}
+}
+
+func (a *app) markDesktopMirrorActive(chatID int64, messageThreadID int) {
+	if a.store != nil {
+		if err := a.store.MarkTelegramActivity(chatID, messageThreadID); err != nil {
+			log.Printf("mark telegram topic activity chat_id=%d thread_id=%d: %v", chatID, messageThreadID, err)
+		}
+	}
+	a.requestMirrorRefresh()
+}
+
+func desktopMirrorRecentlyActive(conv state.Conversation, now time.Time) bool {
+	if strings.TrimSpace(conv.LastTelegramMessageAt) == "" {
+		return false
+	}
+	last, err := time.Parse(time.RFC3339, conv.LastTelegramMessageAt)
+	if err != nil {
+		return false
+	}
+	return now.Sub(last) <= desktopMirrorActiveWindow
 }
 
 func completedTurnsAfterMarker(turns []codex.Turn, marker string) ([]codex.Turn, bool) {

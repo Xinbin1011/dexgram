@@ -25,6 +25,7 @@ func TestStoreUpsertGetAndUpdateConversation(t *testing.T) {
 		ParentCodexThreadID:   "thread-parent",
 		SideIndex:             2,
 		LastSyncedTurnID:      "turn-1",
+		LastTelegramMessageAt: "2026-05-22T10:00:00Z",
 	}
 	if err := store.Upsert(conv); err != nil {
 		t.Fatal(err)
@@ -55,6 +56,7 @@ func TestStoreUpsertGetAndUpdateConversation(t *testing.T) {
 	updated.ParentCodexThreadID = ""
 	updated.SideIndex = 0
 	updated.LastSyncedTurnID = "turn-2"
+	updated.LastTelegramMessageAt = "2026-05-22T11:00:00Z"
 	if err := store.Upsert(updated); err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +69,44 @@ func TestStoreUpsertGetAndUpdateConversation(t *testing.T) {
 		t.Fatal("expected updated conversation to be found")
 	}
 	assertConversationFields(t, got, updated)
+}
+
+func TestStoreMarkTelegramActivity(t *testing.T) {
+	store := openTestStore(t)
+	defer closeTestStore(t, store)
+
+	if err := store.Upsert(Conversation{ChatID: 123, MessageThreadID: 7, CodexThreadID: "thread-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkTelegramActivity(123, 7); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := store.Get(123, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected conversation")
+	}
+	if got.LastTelegramMessageAt == "" {
+		t.Fatal("expected LastTelegramMessageAt")
+	}
+	if _, err := time.Parse(time.RFC3339, got.LastTelegramMessageAt); err != nil {
+		t.Fatalf("LastTelegramMessageAt is not RFC3339: %v", err)
+	}
+	markedAt := got.LastTelegramMessageAt
+	got.LastSyncedTurnID = "turn-1"
+	got.LastTelegramMessageAt = ""
+	if err := store.Upsert(got); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err = store.Get(123, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || got.LastTelegramMessageAt != markedAt {
+		t.Fatalf("expected activity marker to be preserved, got %#v", got)
+	}
 }
 
 func TestStoreNextSideIndex(t *testing.T) {
@@ -437,7 +477,8 @@ func assertConversationFields(t *testing.T, got, want Conversation) {
 		got.ParentMessageThreadID != want.ParentMessageThreadID ||
 		got.ParentCodexThreadID != want.ParentCodexThreadID ||
 		got.SideIndex != want.SideIndex ||
-		got.LastSyncedTurnID != want.LastSyncedTurnID {
+		got.LastSyncedTurnID != want.LastSyncedTurnID ||
+		got.LastTelegramMessageAt != want.LastTelegramMessageAt {
 		t.Fatalf("conversation mismatch\ngot:  %#v\nwant: %#v", got, want)
 	}
 }

@@ -84,10 +84,10 @@ func (a *app) forgetSessionBrowser(token string) {
 }
 
 func (a *app) fetchCodexThreads(ctx context.Context, query string) ([]codex.Thread, error) {
-	c, err := codex.StartStdioWithOptions(ctx, codex.StartOptions{
+	c, err := a.startCodexAppServer(ctx, codex.StartOptions{
 		CLIPath:    a.cfg.Codex.CLIPath,
 		WorkingDir: a.cfg.Codex.CWD,
-	})
+	}, "sessions")
 	if err != nil {
 		return nil, err
 	}
@@ -543,6 +543,7 @@ func (a *app) attachSessionFromBrowser(ctx context.Context, b *bot.Bot, query *m
 		}
 	}
 	a.forgetSessionBrowser(token)
+	a.markDesktopMirrorActive(browser.chatID, browser.messageThreadID)
 	if query.Message.Message != nil {
 		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    query.Message.Message.Chat.ID,
@@ -569,7 +570,6 @@ func (a *app) attachSessionFromBrowser(ctx context.Context, b *bot.Bot, query *m
 			Text:      fmt.Sprintf("Attached Codex session: %s\n%s Live Desktop replies will be mirrored here.", title, syncText),
 		})
 	}
-	a.requestMirrorRefresh()
 	if browser.pendingFreshKey == "" {
 		return
 	}

@@ -207,11 +207,11 @@ Runtime Behavior
   Live status and run-log messages are sent silently. Final answers, approval
   prompts, and user-input prompts use normal Telegram notifications.
 
-  For attached sessions, Dexgram watches the Codex session JSONL file under
-  %%USERPROFILE%%\.codex\sessions and mirrors completed Desktop turns after the
-  saved sync marker. Mirrored Desktop replies include the Desktop prompt as a
-  Markdown quote before the answer. This keeps phone topics caught up without
-  bulk-importing the whole Codex history.
+  For recently active attached sessions, Dexgram watches the Codex session JSONL
+  file under %%USERPROFILE%%\.codex\sessions and mirrors completed Desktop turns
+  after the saved sync marker. Mirrored Desktop replies include the Desktop
+  prompt as a Markdown quote before the answer. Old inactive topics stay mapped
+  for /sessions and /sync, but do not run live mirror workers.
 
   Telegram photos/image documents are sent to Codex as localImage inputs.
   Generic documents are downloaded, mentioned, and included by absolute path.

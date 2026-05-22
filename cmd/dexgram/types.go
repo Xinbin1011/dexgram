@@ -22,6 +22,7 @@ type app struct {
 	configState           configFileState
 	logPath               string
 	mu                    sync.Mutex
+	codexStartMu          sync.Mutex
 	transcriptMu          sync.Mutex
 	projectsMu            sync.RWMutex
 	active                map[string]*activeTurn

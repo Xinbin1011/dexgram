@@ -39,6 +39,13 @@ func sendRichMessageReply(ctx context.Context, b *bot.Bot, chatID int64, message
 
 func sendRichMessageNotifyReply(ctx context.Context, b *bot.Bot, chatID int64, messageThreadID int, text string, notify bool, reply *models.ReplyParameters) error {
 	for _, message := range renderTelegramMessages(text, 3200) {
+		if strings.TrimSpace(message.Text) == "" {
+			fallback := truncatePlainTelegramText(text, 3200)
+			if fallback == "" {
+				continue
+			}
+			message = renderedTelegramMessage{Text: fallback}
+		}
 		if err := waitTelegramQueue(ctx, "send rich message", chatID, messageThreadID); err != nil {
 			return err
 		}
@@ -78,6 +85,13 @@ func editRichMessage(ctx context.Context, b *bot.Bot, chatID int64, messageID in
 		return fmt.Errorf("message too long to edit safely")
 	}
 	rendered := firstRenderedTelegramMessage(text, 3200)
+	if strings.TrimSpace(rendered.Text) == "" {
+		fallback := truncatePlainTelegramText(text, 3200)
+		if fallback == "" {
+			return nil
+		}
+		rendered = renderedTelegramMessage{Text: fallback}
+	}
 	if err := waitTelegramQueue(ctx, "edit rich message", chatID, 0); err != nil {
 		return err
 	}
@@ -527,7 +541,7 @@ func renderTelegramMessages(markdown string, max int) []renderedTelegramMessage 
 	}
 	markdown = strings.TrimSpace(markdown)
 	if markdown == "" {
-		return []renderedTelegramMessage{{Text: " "}}
+		return nil
 	}
 	converted := tgmd.Convert(markdown)
 	chunks := tgmd.Split(tgmd.Message{
@@ -542,7 +556,7 @@ func renderTelegramMessages(markdown string, max int) []renderedTelegramMessage 
 		})
 	}
 	if len(out) == 0 {
-		return []renderedTelegramMessage{{Text: " "}}
+		return nil
 	}
 	return out
 }
@@ -550,9 +564,20 @@ func renderTelegramMessages(markdown string, max int) []renderedTelegramMessage 
 func firstRenderedTelegramMessage(markdown string, max int) renderedTelegramMessage {
 	messages := renderTelegramMessages(markdown, max)
 	if len(messages) == 0 {
-		return renderedTelegramMessage{Text: " "}
+		return renderedTelegramMessage{}
 	}
 	return messages[0]
+}
+
+func truncatePlainTelegramText(text string, max int) string {
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) == 0 {
+		return ""
+	}
+	if max <= 0 || len(runes) <= max {
+		return string(runes)
+	}
+	return string(runes[:max])
 }
 
 func convertTelegramEntities(entities []tgmd.Entity) []models.MessageEntity {

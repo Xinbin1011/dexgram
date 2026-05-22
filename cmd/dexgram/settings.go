@@ -269,10 +269,10 @@ func defaultCodexModel(ctx context.Context, c *codex.Client) (string, error) {
 }
 
 func (a *app) codexModels(ctx context.Context) ([]codex.ModelOption, error) {
-	c, err := codex.StartStdioWithOptions(ctx, codex.StartOptions{
+	c, err := a.startCodexAppServer(ctx, codex.StartOptions{
 		CLIPath:    a.cfg.Codex.CLIPath,
 		WorkingDir: a.cfg.Codex.CWD,
-	})
+	}, "models")
 	if err != nil {
 		return nil, err
 	}

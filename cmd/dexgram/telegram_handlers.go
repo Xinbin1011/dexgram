@@ -67,6 +67,11 @@ func (a *app) handleUpdate(ctx context.Context, b *bot.Bot, update *models.Updat
 		msg.ID,
 		text,
 	)
+	if conv, ok, err := a.store.Get(msg.Chat.ID, msg.MessageThreadID); err != nil {
+		log.Printf("read conversation for mirror activity: %v", err)
+	} else if ok && conv.CodexThreadID != "" {
+		a.markDesktopMirrorActive(msg.Chat.ID, msg.MessageThreadID)
+	}
 
 	if a.handlePendingInputReply(ctx, b, msg) {
 		return

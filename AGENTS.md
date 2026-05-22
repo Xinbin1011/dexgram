@@ -142,6 +142,11 @@ Dexgram is intentionally Windows-specific:
   reconnect with the new token.
 - Manual `/sync [limit]` mirrors unsynced completed turns, defaults to one turn,
   caps at five turns, and truncates oversized historical output.
+- Desktop-to-Telegram live mirroring is scoped to recently active mapped
+  Telegram topics. Dexgram persists `last_telegram_message_at` in SQLite when a
+  user sends a message in a mapped topic, then only runs mirror workers for
+  topics inside that activity window. Old mappings stay available for explicit
+  commands like `/status`, `/sessions`, and `/sync`.
 - Telegram-origin prompts are also inserted into Codex session JSONL as passive
   `Telegram: ...` transcript entries when a safe completed-turn boundary exists.
   These records use normal Codex `response_item message/user` plus `event_msg

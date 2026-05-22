@@ -276,10 +276,14 @@ attached to that Codex session.
 
 Attach sync is intentionally bounded. Dexgram mirrors up to the most recent 25
 rendered Telegram history messages so you get context without flooding the
-topic. After attach, Dexgram watches Codex's session JSONL file and mirrors new
-completed Desktop turns after the saved sync marker. Mirrored Desktop replies
-include the Desktop prompt as a Markdown quote before the answer. Manual
-`/sync [limit]` is also bounded: one completed turn by default, five at most.
+topic. After attach, Dexgram records the last Telegram activity time for the
+topic, watches Codex's session JSONL file only for recently active mapped
+topics, and mirrors new completed Desktop turns after the saved sync marker.
+Old inactive mappings remain available for `/sessions`, `/status`, and manual
+`/sync`, but they do not keep live mirror workers running. Mirrored Desktop
+replies include the Desktop prompt as a Markdown quote before the answer.
+Manual `/sync [limit]` is also bounded: one completed turn by default, five at
+most.
 
 Dexgram also mirrors Telegram prompts back into the Codex Desktop transcript.
 When a Telegram message is sent into an existing Codex thread after at least one

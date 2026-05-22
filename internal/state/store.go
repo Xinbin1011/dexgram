@@ -31,6 +31,7 @@ type Conversation struct {
 	ParentCodexThreadID   string
 	SideIndex             int
 	LastSyncedTurnID      string
+	LastTelegramMessageAt string
 	UpdatedAt             string
 }
 
@@ -106,6 +107,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   topic_title TEXT NOT NULL DEFAULT '',
   topic_named INTEGER NOT NULL DEFAULT 0,
   last_synced_turn_id TEXT NOT NULL DEFAULT '',
+  last_telegram_message_at TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL,
   PRIMARY KEY (chat_id, message_thread_id)
 );
@@ -171,6 +173,7 @@ CREATE TABLE IF NOT EXISTS paused_goals (
 		{name: "parent_message_thread_id", ddl: "parent_message_thread_id INTEGER NOT NULL DEFAULT 0"},
 		{name: "parent_codex_thread_id", ddl: "parent_codex_thread_id TEXT NOT NULL DEFAULT ''"},
 		{name: "side_index", ddl: "side_index INTEGER NOT NULL DEFAULT 0"},
+		{name: "last_telegram_message_at", ddl: "last_telegram_message_at TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := s.ensureColumn("conversations", column.name, column.ddl); err != nil {
 			return err
@@ -183,7 +186,7 @@ func (s *Store) Get(chatID int64, messageThreadID int) (Conversation, bool, erro
 	row := s.db.QueryRow(`
 SELECT chat_id, message_thread_id, codex_thread_id, project_name, cwd, projectless,
        topic_title, topic_named, side_chat, parent_chat_id, parent_message_thread_id,
-       parent_codex_thread_id, side_index, last_synced_turn_id, updated_at
+       parent_codex_thread_id, side_index, last_synced_turn_id, last_telegram_message_at, updated_at
 FROM conversations
 WHERE chat_id = ? AND message_thread_id = ?`, chatID, messageThreadID)
 	conv, err := scanConversation(row)
@@ -200,7 +203,7 @@ func (s *Store) ListConversations() ([]Conversation, error) {
 	rows, err := s.db.Query(`
 SELECT chat_id, message_thread_id, codex_thread_id, project_name, cwd, projectless,
        topic_title, topic_named, side_chat, parent_chat_id, parent_message_thread_id,
-       parent_codex_thread_id, side_index, last_synced_turn_id, updated_at
+       parent_codex_thread_id, side_index, last_synced_turn_id, last_telegram_message_at, updated_at
 FROM conversations
 ORDER BY chat_id, message_thread_id`)
 	if err != nil {
@@ -227,8 +230,8 @@ func (s *Store) Upsert(conv Conversation) error {
 INSERT INTO conversations (
   chat_id, message_thread_id, codex_thread_id, project_name, cwd, projectless,
   topic_title, topic_named, side_chat, parent_chat_id, parent_message_thread_id,
-  parent_codex_thread_id, side_index, last_synced_turn_id, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  parent_codex_thread_id, side_index, last_synced_turn_id, last_telegram_message_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(chat_id, message_thread_id) DO UPDATE SET
   codex_thread_id = excluded.codex_thread_id,
   project_name = excluded.project_name,
@@ -242,6 +245,10 @@ ON CONFLICT(chat_id, message_thread_id) DO UPDATE SET
   parent_codex_thread_id = excluded.parent_codex_thread_id,
   side_index = excluded.side_index,
   last_synced_turn_id = excluded.last_synced_turn_id,
+  last_telegram_message_at = CASE
+    WHEN excluded.last_telegram_message_at != '' THEN excluded.last_telegram_message_at
+    ELSE conversations.last_telegram_message_at
+  END,
   updated_at = excluded.updated_at`,
 		conv.ChatID,
 		conv.MessageThreadID,
@@ -257,7 +264,22 @@ ON CONFLICT(chat_id, message_thread_id) DO UPDATE SET
 		conv.ParentCodexThreadID,
 		conv.SideIndex,
 		conv.LastSyncedTurnID,
+		conv.LastTelegramMessageAt,
 		conv.UpdatedAt,
+	)
+	return err
+}
+
+func (s *Store) MarkTelegramActivity(chatID int64, messageThreadID int) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`
+UPDATE conversations
+SET last_telegram_message_at = ?, updated_at = ?
+WHERE chat_id = ? AND message_thread_id = ?`,
+		now,
+		now,
+		chatID,
+		messageThreadID,
 	)
 	return err
 }
@@ -559,6 +581,7 @@ func scanConversation(row scanner) (Conversation, error) {
 		&conv.ParentCodexThreadID,
 		&conv.SideIndex,
 		&conv.LastSyncedTurnID,
+		&conv.LastTelegramMessageAt,
 		&conv.UpdatedAt,
 	); err != nil {
 		return Conversation{}, fmt.Errorf("scan conversation: %w", err)

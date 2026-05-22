@@ -51,10 +51,10 @@ func (a *app) handleSyncCommand(ctx context.Context, b *bot.Bot, msg *models.Mes
 		return
 	}
 	conv = a.topicConversation(msg.Chat.ID, msg.MessageThreadID)
-	c, err := codex.StartStdioWithOptions(ctx, codex.StartOptions{
+	c, err := a.startCodexAppServer(ctx, codex.StartOptions{
 		CLIPath:    a.cfg.Codex.CLIPath,
 		WorkingDir: appServerWorkingDir(conv),
-	})
+	}, "manual sync")
 	if err != nil {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: msg.Chat.ID, MessageThreadID: msg.MessageThreadID, Text: "Could not start Codex app-server: " + err.Error()})
 		return
@@ -166,10 +166,10 @@ func renderHistoricalTurnNotify(ctx context.Context, b *bot.Bot, chatID int64, m
 }
 
 func (a *app) syncRecentAttachedHistory(ctx context.Context, b *bot.Bot, conv *state.Conversation) error {
-	c, err := codex.StartStdioWithOptions(ctx, codex.StartOptions{
+	c, err := a.startCodexAppServer(ctx, codex.StartOptions{
 		CLIPath:    a.cfg.Codex.CLIPath,
 		WorkingDir: appServerWorkingDir(*conv),
-	})
+	}, "attach sync")
 	if err != nil {
 		return err
 	}

@@ -67,6 +67,15 @@ func TestSplitTelegramChunksHandlesEmptyParagraphsAndLongText(t *testing.T) {
 	}
 }
 
+func TestRenderTelegramMessagesReturnsNoEmptyMessage(t *testing.T) {
+	if got := renderTelegramMessages("   ", 4096); len(got) != 0 {
+		t.Fatalf("empty markdown rendered messages: %#v", got)
+	}
+	if got := firstRenderedTelegramMessage("   ", 4096); got.Text != "" {
+		t.Fatalf("empty first rendered message = %#v", got)
+	}
+}
+
 func TestRunLogLineFormatsKnownItems(t *testing.T) {
 	exitCode := 0
 	tests := []struct {

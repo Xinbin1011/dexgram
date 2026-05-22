@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"dexgram/internal/codex"
 	"dexgram/internal/state"
@@ -83,5 +84,22 @@ func TestCompletedTurnsAfterMarkerReportsMissingMarker(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("expected no turns when marker is missing, got %#v", got)
+	}
+}
+
+func TestDesktopMirrorRecentlyActiveUsesTelegramActivity(t *testing.T) {
+	conv := state.Conversation{
+		LastTelegramMessageAt: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
+	}
+	if !desktopMirrorRecentlyActive(conv, time.Now()) {
+		t.Fatal("expected mirror to be active before expiry")
+	}
+	conv.LastTelegramMessageAt = time.Now().Add(-desktopMirrorActiveWindow - time.Minute).UTC().Format(time.RFC3339)
+	if desktopMirrorRecentlyActive(conv, time.Now()) {
+		t.Fatal("expected mirror to expire")
+	}
+	conv.LastTelegramMessageAt = "not a time"
+	if desktopMirrorRecentlyActive(conv, time.Now()) {
+		t.Fatal("invalid activity timestamp should be inactive")
 	}
 }

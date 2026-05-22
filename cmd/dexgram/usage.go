@@ -46,7 +46,7 @@ func (a *app) readUsageSnapshot(ctx context.Context, chatID int64, messageThread
 	if a.cfg != nil {
 		cliPath = a.cfg.Codex.CLIPath
 	}
-	c, err := codex.StartStdioWithOptions(ctx, codex.StartOptions{CLIPath: cliPath})
+	c, err := a.startCodexAppServer(ctx, codex.StartOptions{CLIPath: cliPath}, "usage")
 	if err != nil {
 		return codex.RateLimitSnapshot{}, err
 	}

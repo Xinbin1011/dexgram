@@ -152,6 +152,16 @@ func TestPausedGoalObjectiveRequiresLivePausedStatus(t *testing.T) {
 	}
 }
 
+func TestIsCodexGoalMissingStorageError(t *testing.T) {
+	err := mockError("app-server returned error for thread/goal/get (code -32603): failed to read thread goal: error returned from database: (code: 1) no such table: thread_goals")
+	if !isCodexGoalMissingStorageError(err) {
+		t.Fatal("expected missing thread_goals table error to be recognized")
+	}
+	if isCodexGoalMissingStorageError(mockError("goals feature is disabled")) {
+		t.Fatal("goals disabled should not be treated as missing storage")
+	}
+}
+
 func TestHandleUpdateGoalClearPhraseSetsObjective(t *testing.T) {
 	b, api := newTelegramTestBot(t)
 	testApp := newHandlerTestApp(t, []int64{123})

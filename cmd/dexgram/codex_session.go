@@ -30,10 +30,11 @@ func (a *app) startTopicSession(ctx context.Context, key string, chatID int64, m
 		cancel()
 		return nil, err
 	}
-	c, err := codex.StartStdioWithOptions(ctx, codex.StartOptions{
+	seedExistingTurns := conv.CodexThreadID != "" && !conv.SideChat
+	c, err := a.startCodexAppServer(ctx, codex.StartOptions{
 		CLIPath:    a.cfg.Codex.CLIPath,
 		WorkingDir: appServerWorkingDir(conv),
-	})
+	}, "topic session key="+key)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -54,6 +55,10 @@ func (a *app) startTopicSession(ctx context.Context, key string, chatID int64, m
 		_ = c.Close()
 		return nil, err
 	}
+	var activeTurns []codex.Turn
+	if seedExistingTurns {
+		activeTurns = a.activeCodexTurnsBestEffort(ctx, c, conv.CodexThreadID)
+	}
 
 	session := &activeTurn{
 		client:         c,
@@ -65,10 +70,14 @@ func (a *app) startTopicSession(ctx context.Context, key string, chatID int64, m
 		titleSyncItems: map[string]bool{},
 		pendingEvents:  map[string][]codex.Event{},
 	}
+	seedSessionAutonomousTurns(session, activeTurns)
 	if !a.registerSession(key, session) {
 		cancel()
 		_ = c.Close()
 		return nil, fmt.Errorf("codex is already running in this topic")
+	}
+	if conv.CodexThreadID != "" {
+		a.markDesktopMirrorActive(chatID, messageThreadID)
 	}
 	go a.collectTopicSession(sessionCtx, key, session)
 	return session, nil
@@ -118,6 +127,48 @@ func (a *app) prepareTopicConversation(ctx context.Context, c *codex.Client, con
 		return state.Conversation{}, err
 	}
 	return conv, nil
+}
+
+func (a *app) activeCodexTurnsBestEffort(ctx context.Context, c *codex.Client, threadID string) []codex.Turn {
+	var read codex.ThreadReadResponse
+	if err := c.Call(ctx, "thread/read", map[string]any{"threadId": threadID}, &read); err != nil {
+		log.Printf("read active Codex turns after resume thread_id=%s: %v", threadID, err)
+		return nil
+	}
+	return activeCodexTurns(read.Thread)
+}
+
+func activeCodexTurns(thread codex.Thread) []codex.Turn {
+	var active []codex.Turn
+	for _, turn := range thread.Turns {
+		if turn.ID != "" && !isTerminalTurnStatus(turn.Status) {
+			active = append(active, turn)
+		}
+	}
+	return active
+}
+
+func seedSessionAutonomousTurns(session *activeTurn, turns []codex.Turn) {
+	if session == nil || len(turns) == 0 {
+		return
+	}
+	for _, turn := range turns {
+		if turn.ID == "" {
+			continue
+		}
+		if session.turns[turn.ID] != nil {
+			continue
+		}
+		session.turns[turn.ID] = &telegramTurn{
+			TurnID:          turn.ID,
+			ChatID:          session.conv.ChatID,
+			MessageThreadID: session.conv.MessageThreadID,
+			Autonomous:      true,
+			Buffers:         map[string]string{},
+			SentFiles:       map[string]bool{},
+		}
+		session.order = append(session.order, turn.ID)
+	}
 }
 
 func (a *app) startCodexThread(ctx context.Context, c *codex.Client, conv state.Conversation) (string, string, error) {
@@ -176,10 +227,10 @@ func (a *app) forkSideTopicThread(ctx context.Context, chatID int64, messageThre
 }
 
 func (a *app) startForkAppServer(ctx context.Context, chatID int64, messageThreadID int, conv state.Conversation) (*codex.Client, error) {
-	c, err := codex.StartStdioWithOptions(ctx, codex.StartOptions{
+	c, err := a.startCodexAppServer(ctx, codex.StartOptions{
 		CLIPath:    a.cfg.Codex.CLIPath,
 		WorkingDir: appServerWorkingDir(conv),
-	})
+	}, "side fork")
 	if err != nil {
 		return nil, err
 	}
@@ -462,10 +513,10 @@ func (a *app) setTopicGoal(ctx context.Context, chatID int64, messageThreadID in
 	if err != nil {
 		return err
 	}
-	c, err := codex.StartStdioWithOptions(ctx, codex.StartOptions{
+	c, err := a.startCodexAppServer(ctx, codex.StartOptions{
 		CLIPath:    a.cfg.Codex.CLIPath,
 		WorkingDir: appServerWorkingDir(conv),
-	})
+	}, "set goal")
 	if err != nil {
 		return err
 	}
@@ -585,10 +636,10 @@ func (a *app) withExistingTopicCodexClient(ctx context.Context, chatID int64, me
 		return fmt.Errorf("this Telegram topic has not started a Codex thread yet")
 	}
 
-	c, err := codex.StartStdioWithOptions(ctx, codex.StartOptions{
+	c, err := a.startCodexAppServer(ctx, codex.StartOptions{
 		CLIPath:    a.cfg.Codex.CLIPath,
 		WorkingDir: appServerWorkingDir(conv),
-	})
+	}, "existing topic")
 	if err != nil {
 		return err
 	}
@@ -640,9 +691,20 @@ func getThreadGoal(ctx context.Context, c *codex.Client, threadID string) (*code
 	if err := c.Call(ctx, "thread/goal/get", map[string]any{
 		"threadId": threadID,
 	}, &out); err != nil {
+		if isCodexGoalMissingStorageError(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return out.Goal, nil
+}
+
+func isCodexGoalMissingStorageError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "no such table: thread_goals")
 }
 
 func textInput(prompt string) []map[string]any {

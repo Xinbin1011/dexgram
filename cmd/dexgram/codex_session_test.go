@@ -101,6 +101,42 @@ func TestStaleActiveTurnIDExtractsAppServerFoundTurn(t *testing.T) {
 	}
 }
 
+func TestActiveCodexTurnsFiltersTerminalTurns(t *testing.T) {
+	got := activeCodexTurns(codex.Thread{Turns: []codex.Turn{
+		{ID: "done", Status: "completed"},
+		{ID: "running", Status: "running"},
+		{ID: "", Status: "running"},
+		{ID: "active", Status: "active"},
+		{ID: "failed", Status: "failed"},
+	}})
+	if len(got) != 2 || got[0].ID != "running" || got[1].ID != "active" {
+		t.Fatalf("active turns = %#v", got)
+	}
+}
+
+func TestSeedSessionAutonomousTurnsTracksResumedActiveGoalTurn(t *testing.T) {
+	session := &activeTurn{
+		conv: state.Conversation{
+			ChatID:          123,
+			MessageThreadID: 7,
+		},
+		turns: map[string]*telegramTurn{},
+	}
+
+	seedSessionAutonomousTurns(session, []codex.Turn{{ID: "goal-turn", Status: "running"}})
+
+	if got := session.turns["goal-turn"]; got == nil || !got.Autonomous || got.ChatID != 123 || got.MessageThreadID != 7 {
+		t.Fatalf("seeded turn = %#v", got)
+	}
+	if len(session.order) != 1 || session.order[0] != "goal-turn" {
+		t.Fatalf("session order = %#v", session.order)
+	}
+	seedSessionAutonomousTurns(session, []codex.Turn{{ID: "goal-turn", Status: "running"}})
+	if len(session.order) != 1 {
+		t.Fatalf("duplicate seed changed order: %#v", session.order)
+	}
+}
+
 func TestIsTerminalTurnStatus(t *testing.T) {
 	for _, status := range []string{"completed", "failed", "cancelled", "canceled", "interrupted"} {
 		if !isTerminalTurnStatus(status) {
