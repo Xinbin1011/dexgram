@@ -105,7 +105,7 @@ func serviceInstall() error {
 		if !isAccessDenied(out) {
 			return err
 		}
-		if fallbackErr := installStartupFallback(taskRun, logPath); fallbackErr != nil {
+		if fallbackErr := installStartupFallback(startupServiceCommand(), logPath); fallbackErr != nil {
 			return fmt.Errorf("%w\nstartup fallback failed: %v", err, fallbackErr)
 		}
 		fmt.Printf("installed Startup login item: %s\n", mustStartupEntryPath())
@@ -160,6 +160,9 @@ func serviceStart() error {
 		}
 		if !startupFallbackInstalled() {
 			return fmt.Errorf("service is not installed; run %s service install", filepath.Base(os.Args[0]))
+		}
+		if refreshErr := installStartupFallback(startupServiceCommand(), mustServiceLogPath()); refreshErr != nil {
+			return refreshErr
 		}
 		return startDexgramDirect()
 	}
@@ -295,6 +298,10 @@ func startupFallbackContent(command, logPath string) string {
 		"start \"\" /min cmd.exe /d /c " + quoteCmdCommand(runCommand) + "\r\n"
 }
 
+func startupServiceCommand() string {
+	return quoteCmdArg(mustServiceExePath()) + " service start"
+}
+
 func removeStartupFallback() error {
 	path := mustStartupEntryPath()
 	if err := os.Remove(path); err != nil {
@@ -331,6 +338,7 @@ func startDexgramDirect() error {
 	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+	detachLongRunningCommand(cmd)
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
 		return fmt.Errorf("start Dexgram: %w", err)
