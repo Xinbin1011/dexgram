@@ -46,6 +46,14 @@ func TestResolveCodexPathFallsBackToLocalAppDataInstall(t *testing.T) {
 	}
 }
 
+func TestAppServerCommandIsIsolated(t *testing.T) {
+	cmd := appServerCommand(context.Background(), `C:\Codex\codex.exe`)
+	if cmd.Path != `C:\Codex\codex.exe` {
+		t.Fatalf("command path = %q", cmd.Path)
+	}
+	assertAppServerCommandIsolated(t, cmd)
+}
+
 func TestClientCallWritesRequestAndReceivesResult(t *testing.T) {
 	client, stdinReader, stdoutWriter := newPipeClient(t)
 	defer func() {

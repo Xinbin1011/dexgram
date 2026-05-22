@@ -89,7 +89,7 @@ func StartStdioWithOptions(ctx context.Context, opts StartOptions) (*Client, err
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, codexPath, "app-server", "--listen", "stdio://")
+	cmd := appServerCommand(ctx, codexPath)
 	if opts.WorkingDir != "" {
 		cmd.Dir = opts.WorkingDir
 	}
