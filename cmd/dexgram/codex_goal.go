@@ -60,9 +60,17 @@ func (a *app) setTopicGoal(ctx context.Context, chatID int64, messageThreadID in
 }
 
 func (a *app) clearTopicGoal(ctx context.Context, chatID int64, messageThreadID int) error {
-	return a.withExistingTopicCodexClient(ctx, chatID, messageThreadID, func(c *codex.Client, threadID string) error {
+	var clearedThreadID string
+	if err := a.withExistingTopicCodexClient(ctx, chatID, messageThreadID, func(c *codex.Client, threadID string) error {
+		clearedThreadID = threadID
 		return clearThreadGoal(ctx, c, threadID)
-	})
+	}); err != nil {
+		return err
+	}
+	if clearedThreadID == "" {
+		return nil
+	}
+	return a.store.DeletePausedGoal(clearedThreadID)
 }
 
 func (a *app) getTopicGoal(ctx context.Context, chatID int64, messageThreadID int) (*codex.ThreadGoal, error) {
@@ -136,6 +144,27 @@ func pausedGoalObjective(goal *codex.ThreadGoal) string {
 		return ""
 	}
 	return strings.TrimSpace(goal.Objective)
+}
+
+func (a *app) getPausedTopicGoal(chatID int64, messageThreadID int) (string, bool, error) {
+	key := fmt.Sprintf("%d:%d", chatID, messageThreadID)
+	if session := a.activeSession(key); session != nil {
+		return a.getPausedThreadGoal(session.threadID)
+	}
+	conv, ok, err := a.store.Get(chatID, messageThreadID)
+	if err != nil || !ok || conv.CodexThreadID == "" {
+		return "", false, err
+	}
+	return a.getPausedThreadGoal(conv.CodexThreadID)
+}
+
+func (a *app) getPausedThreadGoal(threadID string) (string, bool, error) {
+	paused, ok, err := a.store.GetPausedGoal(threadID)
+	if err != nil || !ok {
+		return "", false, err
+	}
+	objective := strings.TrimSpace(paused.Objective)
+	return objective, objective != "", nil
 }
 
 func (a *app) withExistingTopicCodexClient(ctx context.Context, chatID int64, messageThreadID int, fn func(*codex.Client, string) error) error {

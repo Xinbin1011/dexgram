@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dexgram/internal/codex"
+	"dexgram/internal/state"
 
 	"github.com/go-telegram/bot/models"
 )
@@ -47,6 +48,51 @@ func TestHandleUpdateGoalWithoutArgsShowsCurrentGoal(t *testing.T) {
 	}
 	if api.bodyContains("sendMessage", "How should Dexgram use this message?") {
 		t.Fatalf("/goal fell through to Codex prompt handling: %#v", api.calls)
+	}
+}
+
+func TestHandleUpdateGoalWithoutArgsShowsPausedGoalSnapshot(t *testing.T) {
+	b, api := newTelegramTestBot(t)
+	testApp := newHandlerTestApp(t, []int64{123})
+
+	oldGetGoal := getTopicGoalFunc
+	getTopicGoalFunc = func(_ *app, _ context.Context, chatID int64, messageThreadID int) (*codex.ThreadGoal, error) {
+		if chatID != 123 || messageThreadID != 7 {
+			t.Fatalf("get goal target = %d:%d", chatID, messageThreadID)
+		}
+		return nil, nil
+	}
+	defer func() {
+		getTopicGoalFunc = oldGetGoal
+	}()
+
+	if err := testApp.store.Upsert(state.Conversation{
+		ChatID:          123,
+		MessageThreadID: 7,
+		CodexThreadID:   "thread-paused",
+	}); err != nil {
+		t.Fatalf("upsert conversation: %v", err)
+	}
+	if err := testApp.store.SavePausedGoal("thread-paused", "Finish paused goal"); err != nil {
+		t.Fatalf("save paused goal: %v", err)
+	}
+
+	testApp.handleUpdate(context.Background(), b, &models.Update{Message: &models.Message{
+		ID:              5,
+		MessageThreadID: 7,
+		Chat:            models.Chat{ID: 123},
+		Text:            "/goal",
+	}})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && !api.bodyContains("sendMessage", "Codex goal paused") {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !api.bodyContains("sendMessage", "Finish paused goal") {
+		t.Fatalf("paused goal status was not sent: %#v", api.calls)
+	}
+	if api.bodyContains("sendMessage", "No Codex goal is set") {
+		t.Fatalf("paused goal was reported as missing: %#v", api.calls)
 	}
 }
 
