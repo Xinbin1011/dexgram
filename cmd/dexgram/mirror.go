@@ -61,7 +61,7 @@ func (a *app) runDesktopMirrors(ctx context.Context) {
 				continue
 			}
 			key := conversationKey(conv.ChatID, conv.MessageThreadID)
-			if a.activeSession(key) != nil || !desktopMirrorRecentlyActive(conv, time.Now()) {
+			if a.activeSession(key) != nil || !desktopMirrorEligible(conv, time.Now()) {
 				continue
 			}
 			desired[key] = conv
@@ -215,6 +215,17 @@ func (a *app) mirrorConversationOnce(ctx context.Context, key string, conv state
 			log.Printf("desktop mirror stopped for deleted telegram topic key=%s thread_id=%s", key, conv.CodexThreadID)
 			return conv, true
 		}
+		if isMissingCodexRolloutError(err) {
+			log.Printf("desktop mirror disabled for missing Codex rollout key=%s thread_id=%s: %v", key, conv.CodexThreadID, err)
+			if a.store != nil {
+				if clearErr := a.store.ClearTelegramActivity(conv.ChatID, conv.MessageThreadID); clearErr != nil {
+					log.Printf("clear desktop mirror activity key=%s thread_id=%s: %v", key, conv.CodexThreadID, clearErr)
+				} else {
+					conv.LastTelegramMessageAt = ""
+				}
+			}
+			return conv, true
+		}
 		log.Printf("desktop mirror sync key=%s thread_id=%s: %v", key, conv.CodexThreadID, err)
 		return conv, false
 	}
@@ -329,6 +340,20 @@ func desktopMirrorRecentlyActive(conv state.Conversation, now time.Time) bool {
 		return false
 	}
 	return now.Sub(last) <= desktopMirrorActiveWindow
+}
+
+func desktopMirrorEligible(conv state.Conversation, now time.Time) bool {
+	if conv.SideChat {
+		return false
+	}
+	return desktopMirrorRecentlyActive(conv, now)
+}
+
+func isMissingCodexRolloutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "no rollout found for thread id")
 }
 
 func completedTurnsAfterMarker(turns []codex.Turn, marker string) ([]codex.Turn, bool) {

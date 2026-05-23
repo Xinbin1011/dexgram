@@ -866,6 +866,9 @@ func (a *app) shouldKeepSessionOpenForGoal(ctx context.Context, session *activeT
 	if session == nil || session.client == nil || session.threadID == "" {
 		return false
 	}
+	if session.conv.SideChat {
+		return false
+	}
 	goal, err := getThreadGoal(ctx, session.client, session.threadID)
 	if err != nil {
 		log.Printf("read Codex goal after turn completion: %v", err)

@@ -137,6 +137,20 @@ func TestSeedSessionAutonomousTurnsTracksResumedActiveGoalTurn(t *testing.T) {
 	}
 }
 
+func TestShouldKeepSessionOpenForGoalSkipsSideChat(t *testing.T) {
+	app := &app{}
+	session := &activeTurn{
+		client:   &codex.Client{},
+		threadID: "ephemeral-thread",
+		conv: state.Conversation{
+			SideChat: true,
+		},
+	}
+	if app.shouldKeepSessionOpenForGoal(context.Background(), session) {
+		t.Fatal("side chat should not check Codex goal state")
+	}
+}
+
 func TestIsTerminalTurnStatus(t *testing.T) {
 	for _, status := range []string{"completed", "failed", "cancelled", "canceled", "interrupted"} {
 		if !isTerminalTurnStatus(status) {

@@ -272,6 +272,19 @@ WHERE chat_id = ? AND message_thread_id = ?`,
 	return err
 }
 
+func (s *Store) ClearTelegramActivity(chatID int64, messageThreadID int) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`
+UPDATE conversations
+SET last_telegram_message_at = '', updated_at = ?
+WHERE chat_id = ? AND message_thread_id = ?`,
+		now,
+		chatID,
+		messageThreadID,
+	)
+	return err
+}
+
 func (s *Store) DeleteConversation(chatID int64, messageThreadID int) error {
 	_, err := s.db.Exec(`
 DELETE FROM staged_attachments

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -101,5 +102,29 @@ func TestDesktopMirrorRecentlyActiveUsesTelegramActivity(t *testing.T) {
 	conv.LastTelegramMessageAt = "not a time"
 	if desktopMirrorRecentlyActive(conv, time.Now()) {
 		t.Fatal("invalid activity timestamp should be inactive")
+	}
+}
+
+func TestDesktopMirrorEligibleSkipsSideChats(t *testing.T) {
+	conv := state.Conversation{
+		SideChat:              true,
+		LastTelegramMessageAt: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
+	}
+	if desktopMirrorEligible(conv, time.Now()) {
+		t.Fatal("side chats should not use desktop mirror polling")
+	}
+	conv.SideChat = false
+	if !desktopMirrorEligible(conv, time.Now()) {
+		t.Fatal("recent non-side topic should be eligible")
+	}
+}
+
+func TestIsMissingCodexRolloutError(t *testing.T) {
+	err := errors.New("app-server returned error for thread/resume (code -32600): no rollout found for thread id 019e")
+	if !isMissingCodexRolloutError(err) {
+		t.Fatal("expected missing rollout error")
+	}
+	if isMissingCodexRolloutError(errors.New("temporary app-server failure")) {
+		t.Fatal("unexpected missing rollout error")
 	}
 }

@@ -109,6 +109,36 @@ func TestStoreMarkTelegramActivity(t *testing.T) {
 	}
 }
 
+func TestStoreClearTelegramActivity(t *testing.T) {
+	store := openTestStore(t)
+	defer closeTestStore(t, store)
+
+	if err := store.Upsert(Conversation{
+		ChatID:                123,
+		MessageThreadID:       7,
+		CodexThreadID:         "thread-a",
+		LastTelegramMessageAt: "2026-05-22T10:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ClearTelegramActivity(123, 7); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := store.Get(123, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected conversation")
+	}
+	if got.LastTelegramMessageAt != "" {
+		t.Fatalf("expected activity marker to be cleared, got %#v", got)
+	}
+	if got.CodexThreadID != "thread-a" {
+		t.Fatalf("expected mapping to remain, got %#v", got)
+	}
+}
+
 func TestStoreNextSideIndex(t *testing.T) {
 	store := openTestStore(t)
 	defer closeTestStore(t, store)
