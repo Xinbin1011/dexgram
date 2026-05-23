@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -132,6 +133,7 @@ func run() error {
 		configState:           configState,
 		logPath:               logPath,
 		active:                map[string]*activeTurn{},
+		promptLocks:           map[string]*sync.Mutex{},
 		pendingCodexEvents:    map[string][]codex.Event{},
 		approvals:             map[string]*pendingApproval{},
 		actions:               map[string]turnAction{},

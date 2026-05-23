@@ -25,8 +25,10 @@ type app struct {
 	codexStartMu          sync.Mutex
 	codexClient           *codex.Client
 	transcriptMu          sync.Mutex
+	promptLocksMu         sync.Mutex
 	projectsMu            sync.RWMutex
 	active                map[string]*activeTurn
+	promptLocks           map[string]*sync.Mutex
 	pendingCodexEvents    map[string][]codex.Event
 	actions               map[string]turnAction
 	freshTopics           map[string]*pendingFreshTopic

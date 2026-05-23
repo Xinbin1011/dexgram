@@ -6,6 +6,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-telegram/bot"
@@ -42,6 +43,9 @@ func (a *app) handlePromptWithMode(ctx context.Context, b *bot.Bot, msg *models.
 
 func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, messageThreadID int, replyMessageID int, input []map[string]any, displayText, collaborationMode string) {
 	key := fmt.Sprintf("%d:%d", chatID, messageThreadID)
+	unlockPrompt := a.lockTopicPrompt(key)
+	defer unlockPrompt()
+
 	session := a.activeSession(key)
 	if session == nil {
 		var err error
@@ -164,6 +168,21 @@ func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, m
 		a.endSessionStartingTurn(key, session)
 	}
 	a.startTypingIndicator(key, chatID, messageThreadID)
+}
+
+func (a *app) lockTopicPrompt(key string) func() {
+	a.promptLocksMu.Lock()
+	if a.promptLocks == nil {
+		a.promptLocks = map[string]*sync.Mutex{}
+	}
+	lock := a.promptLocks[key]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		a.promptLocks[key] = lock
+	}
+	a.promptLocksMu.Unlock()
+	lock.Lock()
+	return lock.Unlock
 }
 
 func (a *app) markTelegramTurn(codexThreadID, turnID string, chatID int64, messageThreadID, messageID int) {
