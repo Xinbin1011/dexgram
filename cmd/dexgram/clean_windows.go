@@ -8,7 +8,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+
+	"dexgram/internal/state"
 )
 
 func runCleanCommand(w io.Writer) error {
@@ -22,7 +25,7 @@ func cleanDanglingCodexAppServers(w io.Writer) (int, error) {
 		return 0, err
 	}
 	if len(lines) == 0 {
-		fmt.Fprintln(w, "No dangling Codex app-server processes found.")
+		fmt.Fprintln(w, "No stale Dexgram-owned Codex app-server processes found.")
 		return 0, nil
 	}
 	for _, line := range lines {
@@ -33,8 +36,13 @@ func cleanDanglingCodexAppServers(w io.Writer) (int, error) {
 
 func cleanDanglingCodexAppServerLines() ([]string, error) {
 	target := mustServiceExePath()
+	markerPath := defaultCodexAppServerPIDPath()
+	if markerPath == "" {
+		return nil, nil
+	}
 	script := fmt.Sprintf(`
 $target = [System.IO.Path]::GetFullPath(%s)
+$marker = %s
 $current = %d
 $dexgramPids = @(
   Get-CimInstance Win32_Process -Filter "Name = 'dexgram.exe'" | Where-Object {
@@ -43,21 +51,39 @@ $dexgramPids = @(
     ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $target)
   } | ForEach-Object { [int]$_.ProcessId }
 )
-$matches = Get-CimInstance Win32_Process -Filter "Name = 'codex.exe'" | Where-Object {
-  $_.CommandLine -match 'app-server\s+--listen\s+stdio://'
-}
 $killed = @()
-foreach ($proc in $matches) {
-  $id = [int]$proc.ProcessId
-  $parent = [int]$proc.ParentProcessId
-  if ($dexgramPids -contains $parent) {
-    continue
+if (Test-Path -LiteralPath $marker) {
+  $lines = Get-Content -LiteralPath $marker -ErrorAction SilentlyContinue
+  if ($lines.Count -gt 0) {
+    $id = 0
+    if ([int]::TryParse(($lines[0].Trim()), [ref]$id) -and $id -gt 0) {
+      $expectedPath = ""
+      if ($lines.Count -gt 1) { $expectedPath = $lines[1].Trim() }
+      $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $id" -ErrorAction SilentlyContinue
+      if ($null -ne $proc -and
+          $proc.Name -ieq "codex.exe" -and
+          $proc.CommandLine -match 'app-server\s+--listen\s+stdio://' -and
+          ($expectedPath -eq "" -or ([System.IO.Path]::GetFullPath($proc.ExecutablePath) -ieq [System.IO.Path]::GetFullPath($expectedPath)))) {
+        $parent = [int]$proc.ParentProcessId
+        $parentProc = Get-CimInstance Win32_Process -Filter "ProcessId = $parent" -ErrorAction SilentlyContinue
+        $parentIsRunningDexgram = $dexgramPids -contains $parent
+        $parentIsDexgram = $false
+        if ($null -ne $parentProc -and
+            $parentProc.Name -ieq "dexgram.exe" -and
+            $parentProc.ExecutablePath -and
+            ([System.IO.Path]::GetFullPath($parentProc.ExecutablePath) -ieq $target)) {
+          $parentIsDexgram = $true
+        }
+        if (-not $parentIsRunningDexgram -and ($null -eq $parentProc -or $parentIsDexgram)) {
+          Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+          $killed += [pscustomobject]@{ Id = $id; Parent = $parent; Path = $proc.ExecutablePath }
+        }
+      }
+    }
   }
-  Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
-  $killed += [pscustomobject]@{ Id = $id; Parent = $parent; Path = $proc.ExecutablePath }
 }
 $killed | ConvertTo-Json -Compress
-`, quotePowerShellString(target), os.Getpid())
+`, quotePowerShellString(target), quotePowerShellString(markerPath), os.Getpid())
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-Command", script)
 	hideCommandWindow(cmd)
 	out, err := cmd.CombinedOutput()
@@ -97,4 +123,16 @@ $killed | ConvertTo-Json -Compress
 		lines = append(lines, "pid="+id+" parent="+parent+" path="+path)
 	}
 	return lines, nil
+}
+
+func defaultCodexAppServerPIDPath() string {
+	statePath, err := state.DefaultPath()
+	if err == nil && strings.TrimSpace(statePath) != "" {
+		return filepath.Join(filepath.Dir(statePath), "codex-app-server.pid")
+	}
+	appData := strings.TrimSpace(os.Getenv("APPDATA"))
+	if appData == "" {
+		return ""
+	}
+	return filepath.Join(appData, "Dexgram", "codex-app-server.pid")
 }

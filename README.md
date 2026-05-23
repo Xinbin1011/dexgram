@@ -126,18 +126,18 @@ dexgram update
 
 You can also update from Telegram with `/update`. Dexgram announces before it
 restarts and again after it comes back, which is exactly the kind of civilized
-behavior a bridge should have. Updates also run Dexgram's Codex app-server
+behavior a bridge should have. Updates also run Dexgram's stale app-server
 cleanup after the bridge restarts.
 
-Clean up dangling Codex app-server processes:
+Clean up stale Dexgram-owned Codex app-server processes:
 
 ```powershell
 dexgram clean
 ```
 
-This keeps the app-server directly owned by the running Dexgram service and
-kills other `codex.exe app-server --listen stdio://` processes that can survive
-tool crashes or interrupted restarts.
+This only targets the Dexgram PID-marker app-server when it is clearly stale.
+It does not clean up app-server processes launched by Codex Desktop or Codex
+tool runtimes.
 
 ### Option 2: Manual Setup
 
@@ -252,7 +252,7 @@ Commands are registered only for authorized chats.
 - `/sync [limit]` mirrors completed Codex turns that have not been synced yet.
   It defaults to 1 turn, caps at 5 turns, and truncates oversized historical
   output.
-- `/update` updates Dexgram, restarts the bridge, and runs dangling app-server
+- `/update` updates Dexgram, restarts the bridge, and runs stale app-server
   cleanup.
 - `/steer <message>` steers the currently active Codex turn.
 - `/goal` shows the current native Codex goal for the topic. `/goal <objective>`

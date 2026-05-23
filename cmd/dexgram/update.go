@@ -175,9 +175,9 @@ func runUpdateWorkflow(ctx context.Context, release githubRelease, w io.Writer) 
 	if err := serviceStart(); err != nil {
 		return fmt.Errorf("start Dexgram service after update: %w", err)
 	}
-	fmt.Fprintln(w, "Cleaning dangling Codex app-server processes...")
+	fmt.Fprintln(w, "Cleaning stale Dexgram-owned Codex app-server processes...")
 	if _, err := cleanDanglingCodexAppServers(w); err != nil {
-		return fmt.Errorf("clean dangling Codex app-server processes after update: %w", err)
+		return fmt.Errorf("clean stale Dexgram-owned Codex app-server processes after update: %w", err)
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Dexgram updated to %s.\n", cleanVersion(release.TagName))

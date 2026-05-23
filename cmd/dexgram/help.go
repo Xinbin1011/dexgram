@@ -67,13 +67,13 @@ Update
       Check GitHub for a newer release. If one exists, run the installer in
       update mode, replace %%LOCALAPPDATA%%\Dexgram\dexgram.exe, and skip
       onboarding. After a successful update, start the Dexgram service and
-      clean dangling Codex app-server processes.
+      clean stale Dexgram-owned Codex app-server processes.
 
 Clean
 
   %[1]s clean
-      Kill dangling Codex app-server processes while keeping the app-server
-      directly owned by the running Dexgram service.
+      Kill only Dexgram's stale PID-marker app-server. Processes launched by
+      Codex Desktop or Codex tool runtimes are left alone.
 
 Version
 
