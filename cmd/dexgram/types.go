@@ -56,6 +56,7 @@ type activeTurn struct {
 	titleSyncItems map[string]bool
 	pendingEvents  map[string][]codex.Event
 	startingTurns  int
+	desktopWatchID string
 	typing         bool
 }
 

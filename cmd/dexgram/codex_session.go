@@ -47,7 +47,11 @@ func (a *app) startTopicSession(ctx context.Context, key string, chatID int64, m
 	}
 	var activeTurns []codex.Turn
 	if seedExistingTurns {
-		activeTurns = a.activeCodexTurnsBestEffort(ctx, c, conv.CodexThreadID)
+		if desktopID, ok := a.activeDesktopSessionTurnBestEffort(conv.CodexThreadID); ok {
+			activeTurns = []codex.Turn{{ID: desktopID, Status: "running"}}
+		} else {
+			activeTurns = a.activeCodexTurnsBestEffort(ctx, c, conv.CodexThreadID)
+		}
 	}
 
 	session := &activeTurn{
@@ -143,6 +147,11 @@ func (a *app) shouldQueuePrompt(ctx context.Context, key string, session *active
 	if session == nil || session.client == nil || session.threadID == "" {
 		return a.sessionTurnCount(key) > 0
 	}
+	if desktopID, ok := a.activeDesktopSessionTurnBestEffort(session.threadID); ok {
+		a.replaceActiveSessionTurn(key, codex.Turn{ID: desktopID, Status: "running"})
+		a.startDesktopTurnCompletionWatcher(key, session, desktopID)
+		return true
+	}
 	current := a.currentTurnID(key)
 	active, err := latestActiveThreadTurn(ctx, session.client, session.threadID)
 	if err != nil {
@@ -157,6 +166,70 @@ func (a *app) shouldQueuePrompt(ctx context.Context, key string, session *active
 		a.replaceActiveSessionTurn(key, active)
 	}
 	return true
+}
+
+func (a *app) activeDesktopSessionTurnBestEffort(threadID string) (string, bool) {
+	desktopID, ok, err := activeCodexSessionTurnID(threadID)
+	if err != nil {
+		log.Printf("read active Codex session file turn before prompt submit thread_id=%s: %v", threadID, err)
+		return "", false
+	}
+	return desktopID, ok
+}
+
+func (a *app) startDesktopTurnCompletionWatcher(key string, session *activeTurn, turnID string) {
+	if turnID == "" {
+		return
+	}
+	a.mu.Lock()
+	if a.active[key] != session || session.desktopWatchID == turnID {
+		a.mu.Unlock()
+		return
+	}
+	session.desktopWatchID = turnID
+	a.mu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-session.ctx.Done():
+				return
+			case <-ticker.C:
+				activeID, ok, err := activeCodexSessionTurnID(session.threadID)
+				if err != nil {
+					log.Printf("watch active desktop Codex turn thread_id=%s turn_id=%s: %v", session.threadID, turnID, err)
+					continue
+				}
+				if ok && activeID == turnID {
+					continue
+				}
+				a.finishDesktopWatchedTurn(session.ctx, key, session, turnID)
+				return
+			}
+		}
+	}()
+}
+
+func (a *app) finishDesktopWatchedTurn(ctx context.Context, key string, session *activeTurn, turnID string) {
+	a.mu.Lock()
+	if a.active[key] != session {
+		a.mu.Unlock()
+		return
+	}
+	session.desktopWatchID = ""
+	a.mu.Unlock()
+
+	if updated, err := a.mirrorCompletedDesktopTurns(ctx, session.client, key, session.conv); err != nil {
+		log.Printf("desktop turn completion mirror key=%s thread_id=%s turn_id=%s: %v", key, session.threadID, turnID, err)
+	} else {
+		session.conv = updated
+	}
+	a.removeSessionTurn(key, turnID)
+	if !a.startNextQueuedTurn(ctx, key, session) && a.sessionTurnCount(key) == 0 && !a.shouldKeepSessionOpenForGoal(ctx, session) {
+		a.closeTopicSession(key, session)
+	}
 }
 
 func seedSessionAutonomousTurns(session *activeTurn, turns []codex.Turn) {
