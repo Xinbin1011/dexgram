@@ -53,9 +53,12 @@ living on your Windows machine.
 - **Live, controllable runs**: Telegram mirrors assistant text, run logs, tool
   activity, file edits, final answers, approvals, and input prompts. Messages
   sent while Codex is busy queue locally with steer/delete controls.
-- **Local context without drama**: attachments, local file links, goals, Plan
-  Mode, model selection, reasoning effort, hot reload, pairing codes, and the
-  Windows login task all stay inside the small bridge.
+- **Native Codex goals**: `/goal` is fully supported against the same thread
+  goal Codex Desktop uses. Dexgram does not keep a separate active goal system,
+  so goals set from Telegram and Desktop stay on the same Codex thread state.
+- **Local context without drama**: attachments, local file links, Plan Mode,
+  model selection, reasoning effort, hot reload, pairing codes, and the Windows
+  login task all stay inside the small bridge.
 
 ## Windows Only
 
@@ -241,9 +244,11 @@ Commands are registered only for authorized chats.
 - `/update` updates Dexgram and restarts the bridge.
 - `/steer <message>` steers the currently active Codex turn.
 - `/goal` shows the current native Codex goal for the topic. `/goal <objective>`
-  sets it. `/goal pause` stores the current goal by Codex thread id, then clears
-  it in Codex. `/goal resume` restores that stored goal. `/goal clear` clears
-  without storing it; `delete`, `remove`, `stop`, `off`, and `none` are aliases.
+  sets the same thread goal Codex Desktop uses; Dexgram does not track a
+  separate active goal. `/goal pause` stores a temporary paused snapshot by Codex
+  thread id, then clears it in Codex. `/goal resume` restores that shared Codex
+  goal. `/goal clear` clears without storing it; `delete`, `remove`, `stop`,
+  `off`, and `none` are aliases.
 - `/plan <message>` starts a Codex Plan Mode turn.
 - `/settings` shows Telegram-started Plan Mode settings.
 - `/model [model-id|auto]` chooses the Plan Mode model.
