@@ -8,6 +8,13 @@ Dexgram is a Windows-only Telegram bridge for Codex Desktop. It runs as a Go
 binary, listens through a Telegram bot with threaded topics enabled, and maps
 Telegram topics to Codex app-server threads.
 
+Dexgram owns one shared Codex `app-server --listen stdio://` process per
+Dexgram runtime. Topic sessions are routing records over that shared client, not
+one app-server per Telegram topic. Events and approval/user-input requests must
+be routed by Codex `threadId`/`turnId` to the mapped Telegram topic. The shared
+app-server is tracked with a small PID marker and guarded by a Windows Job
+Object so stale children are cleaned up after crashes or restarts.
+
 Side chats are Telegram topics created with `/side` or `/btw`. They are backed
 by native Codex `thread/fork`, keep the same project/cwd as the parent, and use
 a `↳N` topic-name prefix so they do not get confused with the main topic.

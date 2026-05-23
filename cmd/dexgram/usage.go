@@ -50,25 +50,6 @@ func (a *app) readUsageSnapshot(ctx context.Context, chatID int64, messageThread
 	if err != nil {
 		return codex.RateLimitSnapshot{}, err
 	}
-	done := make(chan struct{})
-	defer close(done)
-	defer func() {
-		_ = c.Close()
-	}()
-	errs := c.Errors()
-	go func() {
-		for {
-			select {
-			case err, ok := <-errs:
-				if !ok {
-					return
-				}
-				log.Printf("codex app-server: %v", err)
-			case <-done:
-				return
-			}
-		}
-	}()
 	return readCodexUsage(ctx, c)
 }
 

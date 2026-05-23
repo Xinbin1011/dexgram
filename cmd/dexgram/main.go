@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"dexgram/internal/codex"
 	"dexgram/internal/config"
 	"dexgram/internal/state"
 
@@ -131,12 +132,15 @@ func run() error {
 		configState:           configState,
 		logPath:               logPath,
 		active:                map[string]*activeTurn{},
+		pendingCodexEvents:    map[string][]codex.Event{},
 		approvals:             map[string]*pendingApproval{},
 		actions:               map[string]turnAction{},
 		inputs:                map[string]*pendingInput{},
 		mirrorRefresh:         make(chan struct{}, 1),
 		typingSuppressedUntil: map[string]time.Time{},
 	}
+	defer app.closeCodexAppServer()
+	app.cleanupStaleCodexAppServer()
 	if len(cfg.Telegram.ChatIDs) == 0 {
 		log.Printf("telegram.chat_ids is empty; all chats are unauthorized, skipping Codex project discovery")
 	} else {

@@ -76,6 +76,25 @@ func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, m
 		turnID, err = startTurn(ctx, session.client, session.threadID, input, opts)
 		if err != nil {
 			a.endSessionStartingTurn(key, session)
+			if isCodexClientClosedError(err) {
+				a.closeTopicSession(key, session)
+				session, err = a.startTopicSession(ctx, key, chatID, messageThreadID, displayText)
+				if err == nil {
+					opts, optErr = a.turnOptions(ctx, session.client, collaborationMode)
+					if optErr != nil {
+						err = optErr
+					} else {
+						a.syncTelegramPromptTranscript(chatID, messageThreadID, replyMessageID, session.threadID, displayText)
+						a.beginSessionStartingTurn(key, session)
+						turnID, err = startTurn(ctx, session.client, session.threadID, input, opts)
+						if err != nil {
+							a.endSessionStartingTurn(key, session)
+						}
+					}
+				}
+			}
+		}
+		if err != nil {
 			log.Printf("codex turn start failed: %v", err)
 			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID:          chatID,

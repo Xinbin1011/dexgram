@@ -201,14 +201,6 @@ func (a *app) mirrorConversationOnce(ctx context.Context, key string, conv state
 		log.Printf("start desktop mirror app-server key=%s thread_id=%s: %v", key, conv.CodexThreadID, err)
 		return conv, false
 	}
-	defer func() {
-		_ = c.Close()
-	}()
-	go func() {
-		for err := range c.Errors() {
-			log.Printf("codex app-server desktop mirror key=%s: %v", key, err)
-		}
-	}()
 	updated, err := a.mirrorCompletedDesktopTurns(ctx, c, key, conv)
 	if err != nil {
 		if errors.Is(err, errTelegramTopicGone) {

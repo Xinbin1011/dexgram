@@ -276,9 +276,6 @@ func (a *app) codexModels(ctx context.Context) ([]codex.ModelOption, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		_ = c.Close()
-	}()
 	var out codex.ModelListResponse
 	if err := c.Call(ctx, "model/list", map[string]any{}, &out); err != nil {
 		return nil, err

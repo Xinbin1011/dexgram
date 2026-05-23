@@ -59,14 +59,6 @@ func (a *app) handleSyncCommand(ctx context.Context, b *bot.Bot, msg *models.Mes
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: msg.Chat.ID, MessageThreadID: msg.MessageThreadID, Text: "Could not start Codex app-server: " + err.Error()})
 		return
 	}
-	defer func() {
-		_ = c.Close()
-	}()
-	go func() {
-		for err := range c.Errors() {
-			log.Printf("codex app-server: %v", err)
-		}
-	}()
 	resume, err := a.resumeCodexThreadResult(ctx, c, conv.CodexThreadID)
 	if err != nil {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: msg.Chat.ID, MessageThreadID: msg.MessageThreadID, Text: "Could not resume Codex thread: " + err.Error()})
@@ -173,14 +165,6 @@ func (a *app) syncRecentAttachedHistory(ctx context.Context, b *bot.Bot, conv *s
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = c.Close()
-	}()
-	go func() {
-		for err := range c.Errors() {
-			log.Printf("codex app-server: %v", err)
-		}
-	}()
 	resume, err := a.resumeCodexThreadResult(ctx, c, conv.CodexThreadID)
 	if err != nil {
 		return err

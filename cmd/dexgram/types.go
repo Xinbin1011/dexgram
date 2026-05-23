@@ -23,9 +23,11 @@ type app struct {
 	logPath               string
 	mu                    sync.Mutex
 	codexStartMu          sync.Mutex
+	codexClient           *codex.Client
 	transcriptMu          sync.Mutex
 	projectsMu            sync.RWMutex
 	active                map[string]*activeTurn
+	pendingCodexEvents    map[string][]codex.Event
 	actions               map[string]turnAction
 	freshTopics           map[string]*pendingFreshTopic
 	sessionBrowsers       map[string]*sessionBrowser

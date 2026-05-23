@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	"dexgram/internal/codex"
@@ -27,28 +26,6 @@ func (a *app) setTopicGoal(ctx context.Context, chatID int64, messageThreadID in
 	if err != nil {
 		return err
 	}
-	done := make(chan struct{})
-	defer close(done)
-	defer func() {
-		_ = c.Close()
-	}()
-	errs := c.Errors()
-	go func() {
-		for {
-			select {
-			case err, ok := <-errs:
-				if !ok {
-					return
-				}
-				log.Printf("codex app-server: %v", err)
-			case <-done:
-				return
-			}
-		}
-	}()
-	c.SetServerRequestHandler(func(_ context.Context, req codex.ServerRequest) (any, error) {
-		return a.requestApproval(ctx, chatID, messageThreadID, req)
-	})
 	conv, err = a.prepareTopicConversation(ctx, c, conv)
 	if err != nil {
 		return err
@@ -132,28 +109,6 @@ func (a *app) withExistingTopicCodexClient(ctx context.Context, chatID int64, me
 	if err != nil {
 		return err
 	}
-	done := make(chan struct{})
-	defer close(done)
-	defer func() {
-		_ = c.Close()
-	}()
-	errs := c.Errors()
-	go func() {
-		for {
-			select {
-			case err, ok := <-errs:
-				if !ok {
-					return
-				}
-				log.Printf("codex app-server: %v", err)
-			case <-done:
-				return
-			}
-		}
-	}()
-	c.SetServerRequestHandler(func(_ context.Context, req codex.ServerRequest) (any, error) {
-		return a.requestApproval(ctx, chatID, messageThreadID, req)
-	})
 	if err := a.resumeCodexThread(ctx, c, conv.CodexThreadID); err != nil {
 		return err
 	}

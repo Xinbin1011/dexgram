@@ -91,14 +91,6 @@ func (a *app) fetchCodexThreads(ctx context.Context, query string) ([]codex.Thre
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		_ = c.Close()
-	}()
-	go func() {
-		for err := range c.Errors() {
-			log.Printf("codex app-server: %v", err)
-		}
-	}()
 
 	threads, err := fetchThreadListPages(ctx, c, query, true)
 	if err != nil {

@@ -31,6 +31,7 @@ type Client struct {
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 	stderr io.ReadCloser
+	guard  appServerProcessGuard
 
 	nextID         atomic.Int64
 	pending        map[int64]chan rpcMessage
@@ -38,6 +39,7 @@ type Client struct {
 	errs           chan error
 	requestHandler ServerRequestHandler
 	mu             sync.Mutex
+	lastErr        error
 	closed         chan struct{}
 	readers        sync.WaitGroup
 }
@@ -112,12 +114,19 @@ func StartStdioWithOptions(ctx context.Context, opts StartOptions) (*Client, err
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	guard, err := guardAppServerProcess(cmd)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, err
+	}
 
 	c := &Client{
 		cmd:     cmd,
 		stdin:   stdin,
 		stdout:  stdout,
 		stderr:  stderr,
+		guard:   guard,
 		pending: make(map[int64]chan rpcMessage),
 		events:  make(chan rpcMessage, 256),
 		errs:    make(chan error, 8),
@@ -312,6 +321,24 @@ func (c *Client) Errors() <-chan error {
 	return c.errs
 }
 
+func (c *Client) Done() <-chan struct{} {
+	return c.closed
+}
+
+func (c *Client) ProcessID() int {
+	if c == nil || c.cmd == nil || c.cmd.Process == nil {
+		return 0
+	}
+	return c.cmd.Process.Pid
+}
+
+func (c *Client) ExecutablePath() string {
+	if c == nil || c.cmd == nil {
+		return ""
+	}
+	return c.cmd.Path
+}
+
 func (c *Client) SetServerRequestHandler(handler ServerRequestHandler) {
 	c.mu.Lock()
 	c.requestHandler = handler
@@ -352,7 +379,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, out any) e
 		c.forget(id)
 		return ctx.Err()
 	case <-c.closed:
-		return errors.New("codex app-server closed")
+		return c.closedError()
 	}
 }
 
@@ -547,6 +574,9 @@ func normalizeAppServerStderr(line string) string {
 }
 
 func (c *Client) reportError(err error) {
+	c.mu.Lock()
+	c.lastErr = err
+	c.mu.Unlock()
 	select {
 	case <-c.closed:
 		select {
@@ -559,6 +589,16 @@ func (c *Client) reportError(err error) {
 		default:
 		}
 	}
+}
+
+func (c *Client) closedError() error {
+	c.mu.Lock()
+	lastErr := c.lastErr
+	c.mu.Unlock()
+	if lastErr == nil {
+		return errors.New("codex app-server closed")
+	}
+	return fmt.Errorf("codex app-server closed: %w", lastErr)
 }
 
 func (c *Client) handleServerRequest(id int64, method string, params json.RawMessage) {
@@ -623,7 +663,8 @@ func (c *Client) readStderr() {
 
 func (c *Client) wait() {
 	_ = c.cmd.Wait()
-	close(c.closed)
+	_ = c.guard.Close()
 	c.readers.Wait()
+	close(c.closed)
 	close(c.errs)
 }

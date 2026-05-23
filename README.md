@@ -314,8 +314,8 @@ parent topic; each one gets the next number.
 `/side` and `/btw` are guarded: they only work after the source topic has
 already started and registered a Codex thread. A fresh `/new` topic or
 project-only topic needs its first normal Codex message before it can be forked.
-Dexgram starts a fresh app-server for the side topic, creates the ephemeral
-fork there, and keeps that app-server attached to the new topic.
+Dexgram creates the ephemeral fork through its shared Codex app-server and then
+routes that side topic independently by Codex thread and turn IDs.
 
 You can also include the first side-chat prompt in the command:
 

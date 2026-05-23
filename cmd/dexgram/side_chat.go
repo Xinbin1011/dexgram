@@ -64,7 +64,6 @@ func (a *app) handleSideCommand(ctx context.Context, b *bot.Bot, msg *models.Mes
 		Name:   sideName,
 	})
 	if err != nil {
-		_ = sideClient.Close()
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          msg.Chat.ID,
 			MessageThreadID: msg.MessageThreadID,
@@ -95,7 +94,6 @@ func (a *app) handleSideCommand(ctx context.Context, b *bot.Bot, msg *models.Mes
 		side.CWD = parent.CWD
 	}
 	if err := a.store.Upsert(side); err != nil {
-		_ = sideClient.Close()
 		log.Printf("store side topic: %v", err)
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          msg.Chat.ID,
@@ -122,12 +120,8 @@ func (a *app) handleSideCommand(ctx context.Context, b *bot.Bot, msg *models.Mes
 		titleSyncItems: map[string]bool{},
 		pendingEvents:  map[string][]codex.Event{},
 	}
-	sideClient.SetServerRequestHandler(func(_ context.Context, req codex.ServerRequest) (any, error) {
-		return a.requestApproval(ctx, side.ChatID, side.MessageThreadID, req)
-	})
 	if !a.registerSession(sideKey, sideSession) {
 		cancel()
-		_ = sideClient.Close()
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          msg.Chat.ID,
 			MessageThreadID: msg.MessageThreadID,
@@ -135,7 +129,9 @@ func (a *app) handleSideCommand(ctx context.Context, b *bot.Bot, msg *models.Mes
 		})
 		return
 	}
-	go a.collectTopicSession(sessionCtx, sideKey, sideSession)
+	if a.handlePendingCodexEvents(ctx, sideKey, sideSession) {
+		return
+	}
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:              msg.Chat.ID,

@@ -19,8 +19,30 @@ func (a *app) registerSession(key string, session *activeTurn) bool {
 
 func (a *app) activeSession(key string) *activeTurn {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.active[key]
+	session := a.active[key]
+	if session != nil && activeTurnClientClosed(session) {
+		delete(a.active, key)
+	}
+	a.mu.Unlock()
+	if session != nil && activeTurnClientClosed(session) {
+		if session.cancel != nil {
+			session.cancel()
+		}
+		return nil
+	}
+	return session
+}
+
+func activeTurnClientClosed(session *activeTurn) bool {
+	if session == nil || session.client == nil {
+		return false
+	}
+	select {
+	case <-session.client.Done():
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *app) addSessionTurn(key string, turn *telegramTurn) {

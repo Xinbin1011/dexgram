@@ -39,20 +39,10 @@ func (a *app) startTopicSession(ctx context.Context, key string, chatID int64, m
 		cancel()
 		return nil, err
 	}
-	go func() {
-		for err := range c.Errors() {
-			log.Printf("codex app-server: %v", err)
-		}
-	}()
-
-	c.SetServerRequestHandler(func(_ context.Context, req codex.ServerRequest) (any, error) {
-		return a.requestApproval(ctx, chatID, messageThreadID, req)
-	})
 
 	conv, err = a.prepareTopicConversation(ctx, c, conv)
 	if err != nil {
 		cancel()
-		_ = c.Close()
 		return nil, err
 	}
 	var activeTurns []codex.Turn
@@ -73,13 +63,14 @@ func (a *app) startTopicSession(ctx context.Context, key string, chatID int64, m
 	seedSessionAutonomousTurns(session, activeTurns)
 	if !a.registerSession(key, session) {
 		cancel()
-		_ = c.Close()
 		return nil, fmt.Errorf("codex is already running in this topic")
+	}
+	if a.handlePendingCodexEvents(ctx, key, session) {
+		return session, nil
 	}
 	if conv.CodexThreadID != "" {
 		a.markDesktopMirrorActive(chatID, messageThreadID)
 	}
-	go a.collectTopicSession(sessionCtx, key, session)
 	return session, nil
 }
 
@@ -242,7 +233,6 @@ func (a *app) forkSideTopicThread(ctx context.Context, chatID int64, messageThre
 	}
 	threadID, cwd, err := a.forkCodexThread(ctx, c, conv)
 	if err != nil {
-		_ = c.Close()
 		return "", "", nil, err
 	}
 	return threadID, cwd, c, nil
@@ -256,16 +246,6 @@ func (a *app) startForkAppServer(ctx context.Context, chatID int64, messageThrea
 	if err != nil {
 		return nil, err
 	}
-	go func() {
-		for err := range c.Errors() {
-			if err != nil {
-				log.Printf("codex app-server: %v", err)
-			}
-		}
-	}()
-	c.SetServerRequestHandler(func(_ context.Context, req codex.ServerRequest) (any, error) {
-		return a.requestApproval(ctx, chatID, messageThreadID, req)
-	})
 	return c, nil
 }
 
@@ -662,28 +642,6 @@ func (a *app) startNextQueuedTurn(ctx context.Context, key string, session *acti
 		a.endSessionStartingTurn(key, session)
 		a.startTypingIndicator(key, tgTurn.ChatID, tgTurn.MessageThreadID)
 		return true
-	}
-}
-
-func (a *app) collectTopicSession(ctx context.Context, key string, session *activeTurn) {
-	defer func() {
-		a.release(key)
-		session.cancel()
-		_ = session.client.Close()
-	}()
-
-	for ev := range session.client.Events() {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		if a.deferUnknownTurnEvent(key, session, ev) {
-			continue
-		}
-		if a.handleTopicSessionEvent(ctx, key, session, ev) {
-			return
-		}
 	}
 }
 
