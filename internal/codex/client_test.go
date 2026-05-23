@@ -46,12 +46,103 @@ func TestResolveCodexPathFallsBackToLocalAppDataInstall(t *testing.T) {
 	}
 }
 
+func TestResolveCodexPathPrefersNewestLocalCodexVersion(t *testing.T) {
+	localAppData := t.TempDir()
+	binDir := filepath.Join(localAppData, "OpenAI", "Codex", "bin")
+	oldCandidate := filepath.Join(binDir, "codex.exe")
+	newCandidate := filepath.Join(binDir, "3f4fb8cdd344abc7", "codex.exe")
+	writeFakeCodexCandidate(t, oldCandidate, time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC))
+	writeFakeCodexCandidate(t, newCandidate, time.Date(2026, 5, 22, 12, 0, 0, 0, time.UTC))
+	withCodexVersionProbe(t, map[string]string{
+		oldCandidate: "codex-cli 0.130.0-alpha.5",
+		newCandidate: "codex-cli 0.133.0-alpha.1",
+	})
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("LOCALAPPDATA", localAppData)
+
+	got, err := resolveCodexPath("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != newCandidate {
+		t.Fatalf("resolveCodexPath returned %q, want %q", got, newCandidate)
+	}
+}
+
+func TestLatestLocalCodexInstallUsesModTimeForPrereleaseTies(t *testing.T) {
+	binDir := t.TempDir()
+	alphaCandidate := filepath.Join(binDir, "alpha", "codex.exe")
+	previewCandidate := filepath.Join(binDir, "preview", "codex.exe")
+	writeFakeCodexCandidate(t, alphaCandidate, time.Date(2026, 5, 22, 12, 0, 0, 0, time.UTC))
+	writeFakeCodexCandidate(t, previewCandidate, time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC))
+	withCodexVersionProbe(t, map[string]string{
+		alphaCandidate:   "codex-cli 0.133.0-alpha.9",
+		previewCandidate: "codex-cli 0.133.0-preview.1",
+	})
+
+	got, ok := latestLocalCodexInstall(binDir)
+	if !ok {
+		t.Fatal("expected local Codex candidate")
+	}
+	if got != previewCandidate {
+		t.Fatalf("latestLocalCodexInstall returned %q, want %q", got, previewCandidate)
+	}
+}
+
+func TestLatestLocalCodexInstallPrefersStableForSameVersionCore(t *testing.T) {
+	binDir := t.TempDir()
+	stableCandidate := filepath.Join(binDir, "stable", "codex.exe")
+	alphaCandidate := filepath.Join(binDir, "alpha", "codex.exe")
+	writeFakeCodexCandidate(t, stableCandidate, time.Date(2026, 5, 22, 12, 0, 0, 0, time.UTC))
+	writeFakeCodexCandidate(t, alphaCandidate, time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC))
+	withCodexVersionProbe(t, map[string]string{
+		stableCandidate: "codex-cli 0.133.0",
+		alphaCandidate:  "codex-cli 0.133.0-alpha.9",
+	})
+
+	got, ok := latestLocalCodexInstall(binDir)
+	if !ok {
+		t.Fatal("expected local Codex candidate")
+	}
+	if got != stableCandidate {
+		t.Fatalf("latestLocalCodexInstall returned %q, want %q", got, stableCandidate)
+	}
+}
+
 func TestAppServerCommandIsIsolated(t *testing.T) {
 	cmd := appServerCommand(context.Background(), `C:\Codex\codex.exe`)
 	if cmd.Path != `C:\Codex\codex.exe` {
 		t.Fatalf("command path = %q", cmd.Path)
 	}
 	assertAppServerCommandIsolated(t, cmd)
+}
+
+func writeFakeCodexCandidate(t *testing.T, path string, modTime time.Time) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, modTime, modTime); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func withCodexVersionProbe(t *testing.T, versions map[string]string) {
+	t.Helper()
+	original := probeCodexVersion
+	probeCodexVersion = func(path string) (codexVersion, bool) {
+		output, ok := versions[path]
+		if !ok {
+			return codexVersion{}, false
+		}
+		return parseCodexVersion(output)
+	}
+	t.Cleanup(func() {
+		probeCodexVersion = original
+	})
 }
 
 func TestClientCallWritesRequestAndReceivesResult(t *testing.T) {

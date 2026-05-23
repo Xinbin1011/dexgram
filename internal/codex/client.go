@@ -11,9 +11,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const maxAppServerStderrLineLen = 2000
@@ -21,6 +23,8 @@ const maxAppServerParseBufferLen = 1024 * 1024
 const maxAppServerParseBufferLines = 1000
 
 var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+var codexVersionPattern = regexp.MustCompile(`\b(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?\b`)
+var probeCodexVersion = readCodexVersion
 
 type Client struct {
 	cmd    *exec.Cmd
@@ -135,17 +139,144 @@ func resolveCodexPath(cliPath string) (string, error) {
 	if cliPath != "" {
 		return cliPath, nil
 	}
-	if p, err := exec.LookPath("codex"); err == nil {
-		return p, nil
-	}
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData != "" {
-		candidate := filepath.Join(localAppData, "OpenAI", "Codex", "bin", "codex.exe")
-		if _, err := os.Stat(candidate); err == nil {
+		if candidate, ok := latestLocalCodexInstall(filepath.Join(localAppData, "OpenAI", "Codex", "bin")); ok {
 			return candidate, nil
 		}
 	}
+	if p, err := exec.LookPath("codex"); err == nil {
+		return p, nil
+	}
 	return "codex", nil
+}
+
+type codexVersion struct {
+	major      int
+	minor      int
+	patch      int
+	prerelease string
+}
+
+type codexInstallCandidate struct {
+	path       string
+	version    codexVersion
+	hasVersion bool
+	modTime    time.Time
+}
+
+func latestLocalCodexInstall(binDir string) (string, bool) {
+	candidates := localCodexCandidates(binDir)
+	if len(candidates) == 0 {
+		return "", false
+	}
+	best := candidates[0]
+	for _, candidate := range candidates[1:] {
+		if betterCodexCandidate(candidate, best) {
+			best = candidate
+		}
+	}
+	return best.path, true
+}
+
+func localCodexCandidates(binDir string) []codexInstallCandidate {
+	paths := []string{filepath.Join(binDir, "codex.exe")}
+	entries, err := os.ReadDir(binDir)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				paths = append(paths, filepath.Join(binDir, entry.Name(), "codex.exe"))
+			}
+		}
+	}
+
+	var candidates []codexInstallCandidate
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		version, hasVersion := probeCodexVersion(path)
+		candidates = append(candidates, codexInstallCandidate{
+			path:       path,
+			version:    version,
+			hasVersion: hasVersion,
+			modTime:    info.ModTime(),
+		})
+	}
+	return candidates
+}
+
+func betterCodexCandidate(candidate, best codexInstallCandidate) bool {
+	if candidate.hasVersion && best.hasVersion {
+		if cmp := compareCodexVersion(candidate.version, best.version); cmp != 0 {
+			return cmp > 0
+		}
+	}
+	if candidate.hasVersion != best.hasVersion {
+		return candidate.hasVersion
+	}
+	if !candidate.modTime.Equal(best.modTime) {
+		return candidate.modTime.After(best.modTime)
+	}
+	return candidate.path < best.path
+}
+
+func readCodexVersion(path string) (codexVersion, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, path, "--version").Output()
+	if err != nil {
+		return codexVersion{}, false
+	}
+	return parseCodexVersion(string(output))
+}
+
+func parseCodexVersion(output string) (codexVersion, bool) {
+	matches := codexVersionPattern.FindStringSubmatch(output)
+	if matches == nil {
+		return codexVersion{}, false
+	}
+	major, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return codexVersion{}, false
+	}
+	minor, err := strconv.Atoi(matches[2])
+	if err != nil {
+		return codexVersion{}, false
+	}
+	patch, err := strconv.Atoi(matches[3])
+	if err != nil {
+		return codexVersion{}, false
+	}
+	return codexVersion{
+		major:      major,
+		minor:      minor,
+		patch:      patch,
+		prerelease: matches[4],
+	}, true
+}
+
+func compareCodexVersion(a, b codexVersion) int {
+	for _, pair := range [][2]int{
+		{a.major, b.major},
+		{a.minor, b.minor},
+		{a.patch, b.patch},
+	} {
+		if pair[0] > pair[1] {
+			return 1
+		}
+		if pair[0] < pair[1] {
+			return -1
+		}
+	}
+	if a.prerelease == "" && b.prerelease != "" {
+		return 1
+	}
+	if a.prerelease != "" && b.prerelease == "" {
+		return -1
+	}
+	return 0
 }
 
 func (c *Client) Initialize(ctx context.Context) error {
