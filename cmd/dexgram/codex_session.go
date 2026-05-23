@@ -144,6 +144,9 @@ func (a *app) shouldQueuePrompt(ctx context.Context, key string, session *active
 		return a.sessionTurnCount(key) > 0
 	}
 	current := a.currentTurnID(key)
+	if current != "" {
+		return true
+	}
 	active, err := latestActiveThreadTurn(ctx, session.client, session.threadID)
 	if err != nil {
 		log.Printf("read active Codex turn before prompt submit thread_id=%s: %v", session.threadID, err)
