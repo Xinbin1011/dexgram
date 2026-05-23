@@ -19,3 +19,10 @@ func detachLongRunningCommand(cmd *exec.Cmd) {
 		HideWindow:    true,
 	}
 }
+
+func hideCommandWindow(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: createNoWindow,
+		HideWindow:    true,
+	}
+}

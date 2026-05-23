@@ -230,6 +230,7 @@ func printServiceStatusHeader(w io.Writer) {
 
 func runSchtasksCommand(args ...string) (string, error) {
 	cmd := exec.Command("schtasks.exe", args...)
+	hideCommandWindow(cmd)
 	out, err := cmd.CombinedOutput()
 	text := string(out)
 	if err != nil {
@@ -397,7 +398,9 @@ foreach ($proc in $matches) {
 }
 $stopped | ConvertTo-Json -Compress
 `, quotePowerShellString(target), os.Getpid(), stopBlock)
-	out, err := exec.Command("powershell.exe", "-NoProfile", "-Command", script).CombinedOutput()
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-Command", script)
+	hideCommandWindow(cmd)
+	out, err := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil {
 		if text == "" {
@@ -468,7 +471,9 @@ func printDexgramRuntimeStatus() {
 
 func runningDexgramProcesses() ([]string, error) {
 	script := fmt.Sprintf(`Get-Process -Name dexgram -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne %d } | Select-Object Id,Path | ConvertTo-Json -Compress`, os.Getpid())
-	out, err := exec.Command("powershell.exe", "-NoProfile", "-Command", script).CombinedOutput()
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-Command", script)
+	hideCommandWindow(cmd)
+	out, err := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil && text != "" {
 		return nil, err

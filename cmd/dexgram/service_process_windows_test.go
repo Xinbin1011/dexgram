@@ -25,3 +25,19 @@ func TestDetachLongRunningCommandUsesDetachedProcessGroup(t *testing.T) {
 		}
 	}
 }
+
+func TestHideCommandWindowUsesNoWindowFlag(t *testing.T) {
+	cmd := exec.Command("schtasks.exe")
+
+	hideCommandWindow(cmd)
+
+	if cmd.SysProcAttr == nil {
+		t.Fatal("expected SysProcAttr to be set")
+	}
+	if !cmd.SysProcAttr.HideWindow {
+		t.Fatal("expected hidden command window")
+	}
+	if cmd.SysProcAttr.CreationFlags&createNoWindow == 0 {
+		t.Fatalf("CreationFlags=%#x missing %#x", cmd.SysProcAttr.CreationFlags, createNoWindow)
+	}
+}

@@ -131,11 +131,11 @@ func copySelfToUpdateHelper() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve current executable: %w", err)
 	}
-	helperDir := filepath.Join(os.TempDir(), "dexgram-update-"+strconv.Itoa(os.Getpid()))
+	helperDir := filepath.Join(os.TempDir(), "dexgram-run-"+strconv.Itoa(os.Getpid()))
 	if err := os.MkdirAll(helperDir, 0o755); err != nil {
 		return "", fmt.Errorf("create updater helper directory: %w", err)
 	}
-	helperPath := filepath.Join(helperDir, "dexgram-update-helper.exe")
+	helperPath := filepath.Join(helperDir, "dexgram-task.exe")
 	if err := copyFile(current, helperPath); err != nil {
 		return "", fmt.Errorf("copy updater helper: %w", err)
 	}
