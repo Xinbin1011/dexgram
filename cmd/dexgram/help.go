@@ -55,7 +55,7 @@ Setup
        %[1]s -check
   7. Start the daemon:
        %[1]s
-     Or install the user-login scheduled task:
+     Or install the Startup login item:
        %[1]s service install
        %[1]s service start
 
@@ -221,10 +221,9 @@ Runtime Behavior
 
 Service Mode
 
-  Dexgram service mode prefers a current-user Windows Task Scheduler login
-  task. If Task Scheduler denies access, Dexgram installs a per-user Startup
-  folder fallback. It is not a Windows Service, so it runs as the signed-in user
-  and can talk to the same Codex/Desktop context.
+  Dexgram service mode uses a per-user Startup folder login item. It is not a
+  Windows Service, so it runs as the signed-in user and can talk to the same
+  Codex/Desktop context.
 
   Fixed service paths:
     Binary: %%LOCALAPPDATA%%\Dexgram\dexgram.exe
@@ -243,7 +242,8 @@ Service Mode
     %[1]s service uninstall
 
   The future install command can place the binary at the fixed LocalAppData
-  path. The scheduled task runs the binary directly with -config and -log.
+  path. The Startup login item launches Dexgram with the fixed config and log
+  paths.
 
 Storage
 

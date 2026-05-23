@@ -2,11 +2,8 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"dexgram/internal/codex"
@@ -192,99 +189,11 @@ func getThreadGoal(ctx context.Context, c *codex.Client, threadID string) (*code
 		"threadId": threadID,
 	}, &out); err != nil {
 		if isCodexGoalMissingStorageError(err) {
-			goal, fallbackErr := getThreadGoalFromSQLite(threadID)
-			if fallbackErr != nil {
-				log.Printf("read Codex goal from SQLite fallback thread_id=%s: %v", threadID, fallbackErr)
-			}
-			return goal, nil
+			return nil, nil
 		}
 		return nil, err
 	}
 	return out.Goal, nil
-}
-
-func getThreadGoalFromSQLite(threadID string) (*codex.ThreadGoal, error) {
-	threadID = strings.TrimSpace(threadID)
-	if threadID == "" {
-		return nil, nil
-	}
-	paths, err := codexGoalSQLitePaths()
-	if err != nil {
-		return nil, err
-	}
-	var lastErr error
-	for _, path := range paths {
-		goal, ok, err := readThreadGoalFromSQLite(path, threadID)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if ok {
-			return goal, nil
-		}
-	}
-	return nil, lastErr
-}
-
-func codexGoalSQLitePaths() ([]string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	if home == "" {
-		return nil, nil
-	}
-	paths, err := filepath.Glob(filepath.Join(home, ".codex", "goals_*.sqlite"))
-	if err != nil {
-		return nil, err
-	}
-	return paths, nil
-}
-
-func readThreadGoalFromSQLite(path, threadID string) (*codex.ThreadGoal, bool, error) {
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return nil, false, err
-	}
-	defer func() {
-		if closeErr := db.Close(); closeErr != nil {
-			log.Printf("close Codex goals SQLite fallback db: %v", closeErr)
-		}
-	}()
-	if _, err := db.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
-		return nil, false, err
-	}
-	row := db.QueryRow(`
-SELECT thread_id, objective, status, token_budget, tokens_used, time_used_seconds, created_at_ms, updated_at_ms
-FROM thread_goals
-WHERE thread_id = ?`, threadID)
-	var goal codex.ThreadGoal
-	var tokenBudget sql.NullInt64
-	var tokensUsed, timeUsedSeconds, createdAtMS, updatedAtMS int64
-	if err := row.Scan(
-		&goal.ThreadID,
-		&goal.Objective,
-		&goal.Status,
-		&tokenBudget,
-		&tokensUsed,
-		&timeUsedSeconds,
-		&createdAtMS,
-		&updatedAtMS,
-	); err != nil {
-		if err == sql.ErrNoRows || isCodexGoalMissingStorageError(err) {
-			return nil, false, nil
-		}
-		return nil, false, err
-	}
-	if tokenBudget.Valid {
-		budget := float64(tokenBudget.Int64)
-		goal.TokenBudget = &budget
-	}
-	goal.TokensUsed = float64(tokensUsed)
-	goal.TimeUsedSeconds = float64(timeUsedSeconds)
-	goal.CreatedAt = float64(createdAtMS) / 1000
-	goal.UpdatedAt = float64(updatedAtMS) / 1000
-	return &goal, true, nil
 }
 
 func isCodexGoalMissingStorageError(err error) bool {

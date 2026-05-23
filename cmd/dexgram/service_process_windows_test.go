@@ -27,7 +27,7 @@ func TestDetachLongRunningCommandUsesDetachedProcessGroup(t *testing.T) {
 }
 
 func TestHideCommandWindowUsesNoWindowFlag(t *testing.T) {
-	cmd := exec.Command("schtasks.exe")
+	cmd := exec.Command("powershell.exe")
 
 	hideCommandWindow(cmd)
 

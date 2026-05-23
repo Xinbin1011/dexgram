@@ -11,10 +11,9 @@ import (
 	"strings"
 )
 
-const serviceTaskName = "Dexgram"
+const startupItemName = "Dexgram"
 
 var (
-	runSchtasks                       = runSchtasksCommand
 	runningDexgramDirectProcessesFunc = runningDexgramDirectProcesses
 	stopDexgramDirectProcessesFunc    = stopDexgramDirectProcesses
 )
@@ -46,8 +45,7 @@ func runServiceCommand(args []string) error {
 func printServiceHelp(w io.Writer, exe string) {
 	fmt.Fprintf(w, `Dexgram Service Commands
 
-  Dexgram service mode is a Windows Task Scheduler user-login task.
-  If Task Scheduler refuses, Dexgram uses a per-user Startup folder fallback.
+  Dexgram service mode is a per-user Startup folder login item.
   It is not a Windows Service and it runs in the signed-in user's context.
 
 Usage
@@ -68,25 +66,24 @@ Paths
 
 Behavior
 
-  install    creates or replaces the scheduled task %[6]q, or installs the Startup fallback
-  start      starts the scheduled task now, or starts Dexgram directly for the Startup fallback
-  stop       stops the running scheduled task, or the Startup fallback Dexgram process
-  restart    stops the task/process if needed, then starts it again
-  status     prints Task Scheduler/fallback status and the fixed Dexgram paths
-  uninstall  removes the scheduled task and Startup fallback
+  install    creates or replaces the Startup login item and starts Dexgram
+  start      starts Dexgram directly from the fixed service paths
+  stop       stops the running Dexgram process
+  restart    stops the process if needed, then starts it again
+  status     prints Startup login item status and the fixed Dexgram paths
+  uninstall  removes the Startup login item and stops Dexgram
 
 The installer script can place dexgram.exe under %%LOCALAPPDATA%%\Dexgram.
 Config, logs, media, and state live under %%APPDATA%%\Dexgram.
-The service log keeps the newest %[7]d lines.
+The service log keeps the newest %[6]d lines.
 
-`, exe, mustServiceExePath(), mustServiceConfigPath(), mustServiceLogPath(), mustServiceStatePath(), serviceTaskName, logFileMaxLines)
+`, exe, mustServiceExePath(), mustServiceConfigPath(), mustServiceLogPath(), mustServiceStatePath(), logFileMaxLines)
 }
 
 func serviceInstall() error {
 	exePath := mustServiceExePath()
 	configPath := mustServiceConfigPath()
 	logPath := mustServiceLogPath()
-	taskUser := currentTaskUser()
 	if err := os.MkdirAll(filepath.Dir(exePath), 0o755); err != nil {
 		return fmt.Errorf("create binary directory: %w", err)
 	}
@@ -95,39 +92,15 @@ func serviceInstall() error {
 	}
 
 	warnings := servicePathWarnings(exePath, configPath)
-	taskRun := fmt.Sprintf(`"%s" -config "%s" -log "%s"`, exePath, configPath, logPath)
-	args := []string{"/Create", "/TN", serviceTaskName, "/SC", "ONLOGON", "/TR", taskRun, "/RL", "LIMITED", "/F"}
-	if taskUser != "" {
-		args = append(args, "/RU", taskUser, "/IT")
+	if err := installStartupItem(startupDirectCommand()); err != nil {
+		return err
 	}
-	out, err := runSchtasks(args...)
-	if err != nil {
-		if !isAccessDenied(out) {
-			return err
-		}
-		if fallbackErr := installStartupFallback(startupDirectCommand(), ""); fallbackErr != nil {
-			return fmt.Errorf("%w\nstartup fallback failed: %v", err, fallbackErr)
-		}
-		fmt.Printf("installed Startup login item: %s\n", mustStartupEntryPath())
-		if startErr := startDexgramDirect(); startErr != nil {
-			return startErr
-		}
-		for _, warning := range warnings {
-			fmt.Fprintln(os.Stderr, "warning:", warning)
-		}
-		fmt.Printf("binary: %s\n", exePath)
-		fmt.Printf("config: %s\n", configPath)
-		fmt.Printf("log:    %s\n", logPath)
-		return nil
-	}
-	printNonEmpty(out)
-	_ = removeStartupFallback()
+	fmt.Printf("installed Startup login item: %s\n", mustStartupEntryPath())
 	for _, warning := range warnings {
 		fmt.Fprintln(os.Stderr, "warning:", warning)
 	}
-	fmt.Printf("installed user-login task %q\n", serviceTaskName)
-	if taskUser != "" {
-		fmt.Printf("user:   %s\n", taskUser)
+	if err := startDexgramDirect(); err != nil {
+		return err
 	}
 	fmt.Printf("binary: %s\n", exePath)
 	fmt.Printf("config: %s\n", configPath)
@@ -137,57 +110,24 @@ func serviceInstall() error {
 
 func serviceUninstall() error {
 	_ = serviceStop(true)
-	out, err := runSchtasks("/Delete", "/TN", serviceTaskName, "/F")
-	if err != nil {
-		if !isTaskNotFound(out) {
-			return err
-		}
-	} else {
-		printNonEmpty(out)
-		fmt.Printf("removed scheduled task %q\n", serviceTaskName)
-	}
-	if err := removeStartupFallback(); err != nil {
+	if err := removeStartupItem(); err != nil {
 		return err
 	}
 	return nil
 }
 
 func serviceStart() error {
-	out, err := runSchtasks("/Run", "/TN", serviceTaskName)
-	if err != nil {
-		if !isTaskNotFound(out) {
-			return err
-		}
-		if !startupFallbackInstalled() {
-			return fmt.Errorf("service is not installed; run %s service install", filepath.Base(os.Args[0]))
-		}
-		if refreshErr := installStartupFallback(startupDirectCommand(), ""); refreshErr != nil {
-			return refreshErr
-		}
-		return startDexgramDirect()
+	if !startupItemInstalled() {
+		return fmt.Errorf("service is not installed; run %s service install", filepath.Base(os.Args[0]))
 	}
-	printNonEmpty(out)
-	fmt.Printf("started scheduled task %q\n", serviceTaskName)
-	return nil
+	if err := installStartupItem(startupDirectCommand()); err != nil {
+		return err
+	}
+	return startDexgramDirect()
 }
 
 func serviceStop(ignoreNotRunning bool) error {
-	out, err := runSchtasks("/End", "/TN", serviceTaskName)
-	if err != nil {
-		if (isTaskNotFound(out) || isTaskNotRunning(out)) && startupFallbackInstalled() {
-			return stopDexgramDirect(ignoreNotRunning)
-		}
-		if ignoreNotRunning && isTaskNotRunning(out) {
-			return nil
-		}
-		return err
-	}
-	printNonEmpty(out)
-	fmt.Printf("stopped scheduled task %q\n", serviceTaskName)
-	if startupFallbackInstalled() {
-		return stopDexgramDirect(true)
-	}
-	return nil
+	return stopDexgramDirect(ignoreNotRunning)
 }
 
 func serviceRestart() error {
@@ -200,104 +140,39 @@ func serviceRestart() error {
 func serviceStatus() error {
 	printServiceStatusHeader(os.Stdout)
 	printDexgramRuntimeStatus()
-	out, err := runSchtasks("/Query", "/TN", serviceTaskName, "/FO", "LIST", "/V")
-	if err != nil {
-		if isTaskNotFound(out) {
-			fmt.Printf("scheduled task %q is not installed\n", serviceTaskName)
-		} else {
-			return err
-		}
+	if startupItemInstalled() {
+		fmt.Printf("Startup login item is installed at %s\n", mustStartupEntryPath())
 	} else {
-		printNonEmpty(out)
-	}
-	if startupFallbackInstalled() {
-		fmt.Printf("Startup fallback is installed at %s\n", mustStartupEntryPath())
-	} else {
-		fmt.Println("Startup fallback is not installed")
+		fmt.Println("Startup login item is not installed")
 	}
 	return nil
 }
 
 func printServiceStatusHeader(w io.Writer) {
-	fmt.Fprintf(w, "task:   %s\n", serviceTaskName)
 	fmt.Fprintf(w, "version: %s\n", appVersion)
 	fmt.Fprintf(w, "binary: %s\n", mustServiceExePath())
 	fmt.Fprintf(w, "config: %s\n", mustServiceConfigPath())
 	fmt.Fprintf(w, "log:    %s\n", mustServiceLogPath())
 	fmt.Fprintf(w, "state:  %s\n", mustServiceStatePath())
-	fmt.Fprintf(w, "startup fallback: %s\n\n", mustStartupEntryPath())
+	fmt.Fprintf(w, "startup login item: %s\n\n", mustStartupEntryPath())
 }
 
-func runSchtasksCommand(args ...string) (string, error) {
-	cmd := exec.Command("schtasks.exe", args...)
-	hideCommandWindow(cmd)
-	out, err := cmd.CombinedOutput()
-	text := string(out)
-	if err != nil {
-		return text, fmt.Errorf("schtasks %s failed: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(text))
-	}
-	return text, nil
-}
-
-func printNonEmpty(text string) {
-	if trimmed := strings.TrimSpace(text); trimmed != "" {
-		fmt.Println(trimmed)
-	}
-}
-
-func isTaskNotRunning(text string) bool {
-	lower := strings.ToLower(text)
-	return strings.Contains(lower, "not currently running") ||
-		strings.Contains(lower, "not running") ||
-		strings.Contains(lower, "cannot stop")
-}
-
-func isTaskNotFound(text string) bool {
-	lower := strings.ToLower(text)
-	return strings.Contains(lower, "cannot find the file") ||
-		strings.Contains(lower, "does not exist") ||
-		strings.Contains(lower, "cannot find")
-}
-
-func isAccessDenied(text string) bool {
-	lower := strings.ToLower(text)
-	return strings.Contains(lower, "access is denied") ||
-		strings.Contains(lower, "access denied")
-}
-
-func currentTaskUser() string {
-	user := strings.TrimSpace(os.Getenv("USERNAME"))
-	if user == "" {
-		return ""
-	}
-	domain := strings.TrimSpace(os.Getenv("USERDOMAIN"))
-	if domain == "" || strings.Contains(user, `\`) {
-		return user
-	}
-	return domain + `\` + user
-}
-
-func installStartupFallback(command, logPath string) error {
+func installStartupItem(command string) error {
 	path := mustStartupEntryPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create startup directory: %w", err)
 	}
-	content := startupFallbackContent(command, logPath)
+	content := startupItemContent(command)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return fmt.Errorf("write startup fallback: %w", err)
+		return fmt.Errorf("write Startup login item: %w", err)
 	}
 	return nil
 }
 
-func startupFallbackContent(command, logPath string) string {
-	runLine := "start \"\" /min " + command
-	if logPath != "" {
-		runCommand := command + " >> " + quoteCmdArg(logPath) + " 2>&1"
-		runLine = "start \"\" /min cmd.exe /d /c " + quoteCmdCommand(runCommand)
-	}
+func startupItemContent(command string) string {
 	return "@echo off\r\n" +
-		"rem Dexgram user-login startup fallback\r\n" +
-		runLine + "\r\n"
+		"rem Dexgram user-login startup item\r\n" +
+		"start \"\" /min " + command + "\r\n"
 }
 
 func startupDirectCommand() string {
@@ -310,19 +185,19 @@ func startupDirectCommand() string {
 	return "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command " + quoteCmdArg(script)
 }
 
-func removeStartupFallback() error {
+func removeStartupItem() error {
 	path := mustStartupEntryPath()
 	if err := os.Remove(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		return fmt.Errorf("remove Startup fallback: %w", err)
+		return fmt.Errorf("remove Startup login item: %w", err)
 	}
-	fmt.Printf("removed Startup fallback %q\n", path)
+	fmt.Printf("removed Startup login item %q\n", path)
 	return nil
 }
 
-func startupFallbackInstalled() bool {
+func startupItemInstalled() bool {
 	_, err := os.Stat(mustStartupEntryPath())
 	return err == nil
 }
@@ -365,7 +240,7 @@ func stopDexgramDirect(ignoreNotRunning bool) error {
 		if ignoreNotRunning {
 			return nil
 		}
-		return fmt.Errorf("Dexgram Startup fallback process is not running")
+		return fmt.Errorf("Dexgram process is not running")
 	}
 	for _, line := range stopped {
 		fmt.Println("stopped Dexgram process " + line)
@@ -447,11 +322,6 @@ $stopped | ConvertTo-Json -Compress
 
 func quoteCmdArg(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
-}
-
-func quoteCmdCommand(value string) string {
-	// cmd.exe /c expects a quoted executable command as ""program" args".
-	return `"` + value + `"`
 }
 
 func quotePowerShellString(value string) string {
@@ -543,7 +413,7 @@ func mustServiceStatePath() string {
 }
 
 func mustStartupEntryPath() string {
-	return filepath.Join(mustRoamingAppData(), "Microsoft", "Windows", "Start Menu", "Programs", "Startup", serviceTaskName+".cmd")
+	return filepath.Join(mustRoamingAppData(), "Microsoft", "Windows", "Start Menu", "Programs", "Startup", startupItemName+".cmd")
 }
 
 func mustLocalAppData() string {

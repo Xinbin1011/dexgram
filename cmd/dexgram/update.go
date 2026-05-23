@@ -316,7 +316,6 @@ func unzipFile(zipPath, destDir string) error {
 }
 
 func stopDexgramForUpdate(w io.Writer) error {
-	_, _ = runSchtasks("/End", "/TN", serviceTaskName)
 	stopped, err := stopDexgramDirectProcessesFunc()
 	if err != nil {
 		return err

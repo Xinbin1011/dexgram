@@ -2,39 +2,26 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestStartupFallbackContentUsesCmdCompatibleQuotes(t *testing.T) {
-	command := `"C:\Users\Yashau\AppData\Local\Dexgram\dexgram.exe" -config "C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.toml" -log "C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.log"`
-	logPath := `C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.log`
-
-	got := startupFallbackContent(command, logPath)
-
-	if strings.Contains(got, `\"`) {
-		t.Fatalf("startup fallback uses C-style quote escaping: %q", got)
-	}
-	wantLine := `start "" /min cmd.exe /d /c ""C:\Users\Yashau\AppData\Local\Dexgram\dexgram.exe" -config "C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.toml" -log "C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.log" >> "C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.log" 2>&1"`
-	if !strings.Contains(got, wantLine+"\r\n") {
-		t.Fatalf("startup fallback content = %q, want line %q", got, wantLine)
-	}
-}
-
-func TestStartupFallbackContentStartsDirectCommandWhenAlreadyLogged(t *testing.T) {
+func TestStartupItemContentStartsHiddenCommand(t *testing.T) {
 	command := `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Start-Process -FilePath 'C:\Users\Yashau\AppData\Local\Dexgram\dexgram.exe' -ArgumentList @('-config', 'C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.toml', '-log', 'C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.log') -WindowStyle Hidden"`
 
-	got := startupFallbackContent(command, "")
+	got := startupItemContent(command)
 
 	if strings.Contains(got, "cmd.exe /d /c") {
-		t.Fatalf("startup fallback should not wrap logged direct command in cmd.exe: %q", got)
+		t.Fatalf("startup item should not wrap hidden command in cmd.exe: %q", got)
+	}
+	if strings.Contains(got, `\"`) {
+		t.Fatalf("startup item uses C-style quote escaping: %q", got)
 	}
 	wantLine := `start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Start-Process -FilePath 'C:\Users\Yashau\AppData\Local\Dexgram\dexgram.exe' -ArgumentList @('-config', 'C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.toml', '-log', 'C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.log') -WindowStyle Hidden"`
 	if !strings.Contains(got, wantLine+"\r\n") {
-		t.Fatalf("startup fallback content = %q, want line %q", got, wantLine)
+		t.Fatalf("startup item content = %q, want line %q", got, wantLine)
 	}
 }
 
@@ -60,11 +47,11 @@ func TestStartupDirectCommandStartsDexgramHidden(t *testing.T) {
 	}
 }
 
-func TestPrintServiceHelpIncludesTaskAndPaths(t *testing.T) {
+func TestPrintServiceHelpIncludesStartupItemAndPaths(t *testing.T) {
 	var out bytes.Buffer
 	printServiceHelp(&out, "dexgram.exe")
 	text := out.String()
-	for _, want := range []string{"dexgram.exe service install", serviceTaskName, "Startup folder fallback", "Binary:", "Config:", "Logs:"} {
+	for _, want := range []string{"dexgram.exe service install", "Startup folder login item", "Binary:", "Config:", "Logs:"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("service help missing %q: %q", want, text)
 		}
@@ -88,12 +75,6 @@ func TestQuoteCmdArgDoublesEmbeddedQuotes(t *testing.T) {
 	}
 }
 
-func TestQuoteCmdCommandWrapsFullCommand(t *testing.T) {
-	if got := quoteCmdCommand(`"C:\Program Files\Dexgram\dexgram.exe" -check`); got != `""C:\Program Files\Dexgram\dexgram.exe" -check"` {
-		t.Fatalf("quoteCmdCommand() = %q", got)
-	}
-}
-
 func TestQuotePowerShellStringEscapesSingleQuotes(t *testing.T) {
 	got := quotePowerShellString(`C:\Users\O'Brien\AppData\Local\Dexgram\dexgram.exe`)
 	want := `'C:\Users\O''Brien\AppData\Local\Dexgram\dexgram.exe'`
@@ -102,162 +83,24 @@ func TestQuotePowerShellStringEscapesSingleQuotes(t *testing.T) {
 	}
 }
 
-func TestServiceCommandOutputClassifiers(t *testing.T) {
-	if !isTaskNotRunning("ERROR: The system cannot stop the task because it is not currently running.") {
-		t.Fatal("expected task-not-running output to be recognized")
-	}
-	if !isTaskNotFound("ERROR: The system cannot find the file specified.") {
-		t.Fatal("expected task-not-found output to be recognized")
-	}
-	if !isAccessDenied("ERROR: Access is denied.") {
-		t.Fatal("expected access-denied output to be recognized")
-	}
-	if isTaskNotFound("SUCCESS: The scheduled task exists.") {
-		t.Fatal("did not expect success output to look missing")
-	}
-}
-
-func TestServiceStopFallsBackWhenTaskIsMissingAndStartupFallbackIsInstalled(t *testing.T) {
+func TestServiceStartDoesNotDuplicateExistingStartupItemProcess(t *testing.T) {
 	roaming := filepath.Join(t.TempDir(), "Roaming")
 	t.Setenv("APPDATA", roaming)
-	if err := installStartupFallback(`"C:\Dexgram\dexgram.exe"`, `C:\Dexgram\dexgram.log`); err != nil {
-		t.Fatalf("install startup fallback: %v", err)
+	if err := installStartupItem(`"C:\Dexgram\dexgram.exe"`); err != nil {
+		t.Fatalf("install startup item: %v", err)
 	}
 
-	oldRunSchtasks := runSchtasks
-	oldStopDirect := stopDexgramDirectProcessesFunc
-	defer func() {
-		runSchtasks = oldRunSchtasks
-		stopDexgramDirectProcessesFunc = oldStopDirect
-	}()
-
-	var gotArgs []string
-	runSchtasks = func(args ...string) (string, error) {
-		gotArgs = append([]string(nil), args...)
-		return "ERROR: The system cannot find the file specified.", errors.New("exit status 1")
-	}
-	stopDirectCalled := false
-	stopDexgramDirectProcessesFunc = func() ([]string, error) {
-		stopDirectCalled = true
-		return []string{`pid=123 path=C:\Dexgram\dexgram.exe`}, nil
-	}
-
-	if err := serviceStop(false); err != nil {
-		t.Fatalf("serviceStop() = %v", err)
-	}
-	if !stopDirectCalled {
-		t.Fatal("expected Startup fallback process stop path to be used")
-	}
-	wantArgs := []string{"/End", "/TN", serviceTaskName}
-	if strings.Join(gotArgs, "|") != strings.Join(wantArgs, "|") {
-		t.Fatalf("schtasks args = %#v, want %#v", gotArgs, wantArgs)
-	}
-}
-
-func TestServiceStopFallsBackWhenTaskIsNotRunningAndStartupFallbackIsInstalled(t *testing.T) {
-	roaming := filepath.Join(t.TempDir(), "Roaming")
-	t.Setenv("APPDATA", roaming)
-	if err := installStartupFallback(`"C:\Dexgram\dexgram.exe"`, `C:\Dexgram\dexgram.log`); err != nil {
-		t.Fatalf("install startup fallback: %v", err)
-	}
-
-	oldRunSchtasks := runSchtasks
-	oldStopDirect := stopDexgramDirectProcessesFunc
-	defer func() {
-		runSchtasks = oldRunSchtasks
-		stopDexgramDirectProcessesFunc = oldStopDirect
-	}()
-
-	runSchtasks = func(args ...string) (string, error) {
-		return "ERROR: The system cannot stop the task because it is not currently running.", errors.New("exit status 1")
-	}
-	stopDirectCalled := false
-	stopDexgramDirectProcessesFunc = func() ([]string, error) {
-		stopDirectCalled = true
-		return []string{`pid=123 path=C:\Dexgram\dexgram.exe`}, nil
-	}
-
-	if err := serviceStop(false); err != nil {
-		t.Fatalf("serviceStop() = %v", err)
-	}
-	if !stopDirectCalled {
-		t.Fatal("expected Startup fallback process stop path to be used")
-	}
-}
-
-func TestServiceStopAlsoStopsStartupFallbackAfterScheduledTaskStops(t *testing.T) {
-	roaming := filepath.Join(t.TempDir(), "Roaming")
-	t.Setenv("APPDATA", roaming)
-	if err := installStartupFallback(`"C:\Dexgram\dexgram.exe"`, `C:\Dexgram\dexgram.log`); err != nil {
-		t.Fatalf("install startup fallback: %v", err)
-	}
-
-	oldRunSchtasks := runSchtasks
-	oldStopDirect := stopDexgramDirectProcessesFunc
-	defer func() {
-		runSchtasks = oldRunSchtasks
-		stopDexgramDirectProcessesFunc = oldStopDirect
-	}()
-
-	runSchtasks = func(args ...string) (string, error) {
-		return "SUCCESS: The scheduled task was terminated.", nil
-	}
-	stopDirectCalled := false
-	stopDexgramDirectProcessesFunc = func() ([]string, error) {
-		stopDirectCalled = true
-		return []string{`pid=123 path=C:\Dexgram\dexgram.exe`}, nil
-	}
-
-	if err := serviceStop(false); err != nil {
-		t.Fatalf("serviceStop() = %v", err)
-	}
-	if !stopDirectCalled {
-		t.Fatal("expected Startup fallback process stop path to be used")
-	}
-}
-
-func TestServiceStartDoesNotDuplicateExistingStartupFallbackProcess(t *testing.T) {
-	roaming := filepath.Join(t.TempDir(), "Roaming")
-	t.Setenv("APPDATA", roaming)
-	if err := installStartupFallback(`"C:\Dexgram\dexgram.exe"`, `C:\Dexgram\dexgram.log`); err != nil {
-		t.Fatalf("install startup fallback: %v", err)
-	}
-
-	oldRunSchtasks := runSchtasks
 	oldRunningDirect := runningDexgramDirectProcessesFunc
 	defer func() {
-		runSchtasks = oldRunSchtasks
 		runningDexgramDirectProcessesFunc = oldRunningDirect
 	}()
 
-	runSchtasks = func(args ...string) (string, error) {
-		return "ERROR: The system cannot find the file specified.", errors.New("exit status 1")
-	}
 	runningDexgramDirectProcessesFunc = func() ([]string, error) {
 		return []string{`pid=123 path=C:\Dexgram\dexgram.exe`}, nil
 	}
 
 	if err := serviceStart(); err != nil {
 		t.Fatalf("serviceStart() = %v", err)
-	}
-}
-
-func TestCurrentTaskUserUsesDomainWhenAvailable(t *testing.T) {
-	t.Setenv("USERNAME", "alice")
-	t.Setenv("USERDOMAIN", "WORKSTATION")
-	if got := currentTaskUser(); got != `WORKSTATION\alice` {
-		t.Fatalf("current task user = %q", got)
-	}
-
-	t.Setenv("USERNAME", `DOMAIN\bob`)
-	t.Setenv("USERDOMAIN", "IGNORED")
-	if got := currentTaskUser(); got != `DOMAIN\bob` {
-		t.Fatalf("domain-qualified user = %q", got)
-	}
-
-	t.Setenv("USERNAME", "")
-	if got := currentTaskUser(); got != "" {
-		t.Fatalf("empty user = %q", got)
 	}
 }
 
@@ -298,33 +141,33 @@ func TestServicePathsAndWarningsUseConfiguredAppData(t *testing.T) {
 	}
 }
 
-func TestStartupFallbackInstallStatusAndRemove(t *testing.T) {
+func TestStartupItemInstallStatusAndRemove(t *testing.T) {
 	roaming := filepath.Join(t.TempDir(), "Roaming")
 	t.Setenv("APPDATA", roaming)
 
-	if startupFallbackInstalled() {
-		t.Fatal("startup fallback should not exist before install")
+	if startupItemInstalled() {
+		t.Fatal("startup item should not exist before install")
 	}
-	if err := installStartupFallback(`"C:\Dexgram\dexgram.exe"`, `C:\Dexgram\dexgram.log`); err != nil {
-		t.Fatalf("install startup fallback: %v", err)
+	if err := installStartupItem(`"C:\Dexgram\dexgram.exe"`); err != nil {
+		t.Fatalf("install startup item: %v", err)
 	}
-	if !startupFallbackInstalled() {
-		t.Fatal("startup fallback should exist after install")
+	if !startupItemInstalled() {
+		t.Fatal("startup item should exist after install")
 	}
 	content, err := os.ReadFile(mustStartupEntryPath())
 	if err != nil {
-		t.Fatalf("read startup fallback: %v", err)
+		t.Fatalf("read startup item: %v", err)
 	}
-	if !strings.Contains(string(content), "Dexgram user-login startup fallback") {
-		t.Fatalf("unexpected startup fallback content: %q", content)
+	if !strings.Contains(string(content), "Dexgram user-login startup item") {
+		t.Fatalf("unexpected startup item content: %q", content)
 	}
-	if err := removeStartupFallback(); err != nil {
-		t.Fatalf("remove startup fallback: %v", err)
+	if err := removeStartupItem(); err != nil {
+		t.Fatalf("remove startup item: %v", err)
 	}
-	if startupFallbackInstalled() {
-		t.Fatal("startup fallback should be removed")
+	if startupItemInstalled() {
+		t.Fatal("startup item should be removed")
 	}
-	if err := removeStartupFallback(); err != nil {
-		t.Fatalf("remove missing startup fallback: %v", err)
+	if err := removeStartupItem(); err != nil {
+		t.Fatalf("remove missing startup item: %v", err)
 	}
 }

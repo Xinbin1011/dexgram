@@ -118,9 +118,9 @@ On Windows, ensure `%USERPROFILE%\go\bin` is on `PATH` before running
 
 Dexgram is intentionally Windows-specific:
 
-- Service mode prefers a current-user Windows Task Scheduler login task, falls
-  back to a per-user Startup folder item, and is not a Windows Service.
-  `dexgram service start|stop|restart` should work in both modes.
+- Service mode uses a per-user Startup folder login item and is not a Windows
+  Service. `dexgram service start|stop|restart` manage that login item and the
+  running Dexgram process.
 - Default paths use `%APPDATA%` and `%LOCALAPPDATA%`.
 - The Codex CLI is auto-discovered at
   `%LOCALAPPDATA%\OpenAI\Codex\bin\codex.exe`.
@@ -168,7 +168,7 @@ the user explicitly asks for that.
 - Use structured parsing for TOML, JSON, and SQLite data instead of ad hoc
   string manipulation.
 - Keep logs and errors useful for a user running Dexgram from PowerShell or as
-  a background login task.
+  a Startup login item.
 
 ## Quick Smoke Checks
 

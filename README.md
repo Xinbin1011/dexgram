@@ -58,17 +58,17 @@ living on your Windows machine.
   so goals set from Telegram and Desktop stay on the same Codex thread state.
 - **Local context without drama**: attachments, local file links, Plan Mode,
   model selection, reasoning effort, hot reload, pairing codes, and the Windows
-  login task all stay inside the small bridge.
+  Startup login item all stay inside the small bridge.
 
 ## Windows Only
 
 Dexgram is intentionally Windows-only. Codex is local, the app-server is
 local, and the bridge is happiest when it can live beside them.
 
-Service mode uses a current-user Task Scheduler login task, falling back to the
-per-user Startup folder if Task Scheduler refuses. The same `service start`,
-`service stop`, and `service restart` commands work in either mode. It is not a
-Windows Service; it runs as you, because Codex runs as you.
+Service mode uses a per-user Startup folder login item. The same `service start`,
+`service stop`, and `service restart` commands manage the login item and the
+running Dexgram process. It is not a Windows Service; it runs as you, because
+Codex runs as you.
 
 Because yes, Windows gets nice things too.
 
@@ -111,7 +111,7 @@ Start Dexgram in the foreground:
 dexgram
 ```
 
-Or install the background login task so it starts when you sign in:
+Or install the Startup login item so it starts when you sign in:
 
 ```powershell
 dexgram service install
