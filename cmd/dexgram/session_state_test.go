@@ -178,7 +178,7 @@ func TestUnknownTurnEventsAreDeferredAndReplayed(t *testing.T) {
 	}
 }
 
-func TestUnknownTurnStartedDefersOnlyWhileStartingTelegramTurn(t *testing.T) {
+func TestUnknownTurnStartedIsHandledWhileStartingTelegramTurn(t *testing.T) {
 	app := newTestApp()
 	session := &activeTurn{
 		ctx:           context.Background(),
@@ -201,16 +201,44 @@ func TestUnknownTurnStartedDefersOnlyWhileStartingTelegramTurn(t *testing.T) {
 	}
 
 	app.beginSessionStartingTurn("chat:topic", session)
-	if !app.deferUnknownTurnEvent("chat:topic", session, ev) {
-		t.Fatal("telegram turn/started should be deferred while turn/start is in flight")
+	if app.deferUnknownTurnEvent("chat:topic", session, ev) {
+		t.Fatal("telegram turn/started should be handled while turn/start is in flight")
 	}
 	app.endSessionStartingTurn("chat:topic", session)
 	events := app.takePendingTurnEvents("chat:topic", "turn-1")
-	if len(events) != 1 || events[0].Method != "turn/started" {
-		t.Fatalf("unexpected deferred turn/started events: %#v", events)
+	if len(events) != 0 {
+		t.Fatalf("turn/started should not be deferred: %#v", events)
 	}
 	if app.sessionStartingTurn("chat:topic", session) {
 		t.Fatal("starting turn counter should be cleared")
+	}
+}
+
+func TestPromoteStartingSessionTurnUpdatesAction(t *testing.T) {
+	app := newTestApp()
+	session := &activeTurn{
+		ctx:   context.Background(),
+		turns: map[string]*telegramTurn{},
+	}
+	if !app.registerSession("chat:topic", session) {
+		t.Fatal("expected session register")
+	}
+	app.addSessionTurn("chat:topic", &telegramTurn{TurnID: "starting-1", Starting: true})
+	token := app.rememberTurnAction("chat:topic", "starting-1")
+
+	turn := app.promoteStartingSessionTurn("chat:topic", "starting-1", "turn-1")
+	if turn == nil || turn.TurnID != "turn-1" || turn.Starting {
+		t.Fatalf("unexpected promoted turn: %#v", turn)
+	}
+	if app.sessionTurn("chat:topic", "starting-1") != nil {
+		t.Fatal("starting turn should be removed")
+	}
+	if app.sessionTurn("chat:topic", "turn-1") == nil {
+		t.Fatal("promoted turn should be stored under real id")
+	}
+	action, ok := app.turnAction(token)
+	if !ok || action.TurnID != "turn-1" {
+		t.Fatalf("action was not promoted: %#v ok=%v", action, ok)
 	}
 }
 

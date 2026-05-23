@@ -72,6 +72,7 @@ type telegramTurn struct {
 	Input             []map[string]any
 	CollaborationMode string
 	Autonomous        bool
+	Starting          bool
 	LastAgent         string
 	FinalAnswer       string
 	Buffers           map[string]string

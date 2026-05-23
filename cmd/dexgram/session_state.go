@@ -116,6 +116,10 @@ func (a *app) nextQueuedTurnID() string {
 	return "queued-" + strconv.FormatInt(a.queueSeq.Add(1), 36)
 }
 
+func (a *app) nextStartingTurnID() string {
+	return "starting-" + strconv.FormatInt(a.queueSeq.Add(1), 36)
+}
+
 func (a *app) nextQueuedSessionTurn(key string) *telegramTurn {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -152,6 +156,56 @@ func (a *app) promoteSessionTurn(key, oldTurnID, newTurnID string) *telegramTurn
 		if id == oldTurnID {
 			session.order[i] = newTurnID
 			break
+		}
+	}
+	return turn
+}
+
+func (a *app) promoteStartingSessionTurn(key, oldTurnID, newTurnID string) *telegramTurn {
+	if newTurnID == "" {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	session := a.active[key]
+	if session == nil {
+		return nil
+	}
+	turn := session.turns[newTurnID]
+	if turn != nil {
+		turn.Starting = false
+		return turn
+	}
+	if oldTurnID != "" {
+		turn = session.turns[oldTurnID]
+	}
+	if turn == nil {
+		for _, id := range session.order {
+			candidate := session.turns[id]
+			if candidate != nil && candidate.Starting && !candidate.Queued {
+				oldTurnID = id
+				turn = candidate
+				break
+			}
+		}
+	}
+	if turn == nil || !turn.Starting || turn.Queued {
+		return nil
+	}
+	delete(session.turns, oldTurnID)
+	turn.TurnID = newTurnID
+	turn.Starting = false
+	session.turns[newTurnID] = turn
+	for i, id := range session.order {
+		if id == oldTurnID {
+			session.order[i] = newTurnID
+			break
+		}
+	}
+	for token, action := range a.actions {
+		if action.Key == key && action.TurnID == oldTurnID {
+			action.TurnID = newTurnID
+			a.actions[token] = action
 		}
 	}
 	return turn
@@ -278,7 +332,7 @@ func (a *app) release(key string) {
 }
 
 func (a *app) deferUnknownTurnEvent(key string, session *activeTurn, ev codex.Event) bool {
-	if ev.Method == "turn/started" && !a.sessionStartingTurn(key, session) {
+	if ev.Method == "turn/started" {
 		return false
 	}
 	turnID := eventTurnID(ev)

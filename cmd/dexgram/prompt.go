@@ -44,7 +44,14 @@ func (a *app) handlePromptWithMode(ctx context.Context, b *bot.Bot, msg *models.
 func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, messageThreadID int, replyMessageID int, input []map[string]any, displayText, collaborationMode string) {
 	key := fmt.Sprintf("%d:%d", chatID, messageThreadID)
 	unlockPrompt := a.lockTopicPrompt(key)
-	defer unlockPrompt()
+	locked := true
+	unlock := func() {
+		if locked {
+			unlockPrompt()
+			locked = false
+		}
+	}
+	defer unlock()
 
 	session := a.activeSession(key)
 	if session == nil {
@@ -64,7 +71,6 @@ func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, m
 	queued := a.shouldQueuePrompt(ctx, key, session)
 	var turnID string
 	if !queued {
-		var err error
 		opts, optErr := a.turnOptions(ctx, session.client, collaborationMode)
 		if optErr != nil {
 			log.Printf("codex turn options failed: %v", optErr)
@@ -75,12 +81,56 @@ func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, m
 			})
 			return
 		}
+		turnID = a.nextStartingTurnID()
+		tgTurn := &telegramTurn{
+			TurnID:            turnID,
+			Starting:          true,
+			ChatID:            chatID,
+			MessageThreadID:   messageThreadID,
+			SourceMessageID:   replyMessageID,
+			Text:              displayText,
+			Input:             input,
+			CollaborationMode: normalizeCollaborationMode(collaborationMode),
+			Buffers:           map[string]string{},
+			SentFiles:         map[string]bool{},
+		}
+		actionToken := a.rememberTurnAction(key, turnID)
+		status, err := b.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:              chatID,
+			MessageThreadID:     messageThreadID,
+			Text:                "Dexgram is thinking...",
+			ReplyMarkup:         turnControlMarkup(actionToken, false),
+			DisableNotification: true,
+		})
+		if err == nil {
+			tgTurn.StatusMessageID = status.ID
+		}
+		reportStartFailure := func(text string) {
+			if tgTurn.StatusMessageID != 0 {
+				_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+					ChatID:    chatID,
+					MessageID: tgTurn.StatusMessageID,
+					Text:      text,
+				})
+				return
+			}
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID:          chatID,
+				MessageThreadID: messageThreadID,
+				Text:            text,
+			})
+		}
+		a.addSessionTurn(key, tgTurn)
+		a.startTypingIndicator(key, chatID, messageThreadID)
 		a.syncTelegramPromptTranscript(chatID, messageThreadID, replyMessageID, session.threadID, displayText)
 		a.beginSessionStartingTurn(key, session)
-		turnID, err = startTurn(ctx, session.client, session.threadID, input, opts)
+		unlock()
+		actualTurnID, err := startTurn(ctx, session.client, session.threadID, input, opts)
 		if err != nil {
 			a.endSessionStartingTurn(key, session)
 			if isCodexClientClosedError(err) {
+				a.removeSessionTurn(key, turnID)
+				a.forgetTurnAction(key, turnID)
 				a.closeTopicSession(key, session)
 				session, err = a.startTopicSession(ctx, key, chatID, messageThreadID, displayText)
 				if err == nil {
@@ -88,9 +138,23 @@ func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, m
 					if optErr != nil {
 						err = optErr
 					} else {
+						turnID = a.nextStartingTurnID()
+						tgTurn.TurnID = turnID
+						tgTurn.Starting = true
+						tgTurn.Buffers = map[string]string{}
+						tgTurn.SentFiles = map[string]bool{}
+						a.addSessionTurn(key, tgTurn)
+						actionToken = a.rememberTurnAction(key, turnID)
+						if tgTurn.StatusMessageID != 0 {
+							_, _ = b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
+								ChatID:      chatID,
+								MessageID:   tgTurn.StatusMessageID,
+								ReplyMarkup: turnControlMarkup(actionToken, false),
+							})
+						}
 						a.syncTelegramPromptTranscript(chatID, messageThreadID, replyMessageID, session.threadID, displayText)
 						a.beginSessionStartingTurn(key, session)
-						turnID, err = startTurn(ctx, session.client, session.threadID, input, opts)
+						actualTurnID, err = startTurn(ctx, session.client, session.threadID, input, opts)
 						if err != nil {
 							a.endSessionStartingTurn(key, session)
 						}
@@ -100,14 +164,31 @@ func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, m
 		}
 		if err != nil {
 			log.Printf("codex turn start failed: %v", err)
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID:          chatID,
-				MessageThreadID: messageThreadID,
-				Text:            "Dexgram could not submit the message to Codex:\n\n" + err.Error(),
-			})
+			reportStartFailure("Dexgram could not submit the message to Codex:\n\n" + err.Error())
+			a.removeSessionTurn(key, turnID)
+			a.forgetTurnAction(key, turnID)
 			return
 		}
-		a.markTelegramTurn(session.threadID, turnID, chatID, messageThreadID, replyMessageID)
+		if actualTurnID == "" {
+			log.Printf("codex turn start returned empty turn id thread_id=%s", session.threadID)
+			reportStartFailure("Dexgram could not submit the message to Codex: Codex returned an empty turn id.")
+			a.removeSessionTurn(key, turnID)
+			a.forgetTurnAction(key, turnID)
+			return
+		}
+		if err := a.store.ClearStagedAttachments(chatID, messageThreadID); err != nil {
+			log.Printf("clear staged attachments: %v", err)
+		}
+		a.markTelegramTurn(session.threadID, actualTurnID, chatID, messageThreadID, replyMessageID)
+		a.promoteStartingSessionTurn(key, turnID, actualTurnID)
+		for _, ev := range a.takePendingTurnEvents(key, actualTurnID) {
+			if a.handleTopicSessionEvent(ctx, key, session, ev) {
+				a.endSessionStartingTurn(key, session)
+				return
+			}
+		}
+		a.endSessionStartingTurn(key, session)
+		return
 	} else {
 		turnID = a.nextQueuedTurnID()
 	}
@@ -144,18 +225,6 @@ func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, m
 		if err == nil {
 			tgTurn.StatusMessageID = status.ID
 		}
-	} else {
-		actionToken := a.rememberTurnAction(key, turnID)
-		status, err := b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:              chatID,
-			MessageThreadID:     messageThreadID,
-			Text:                "Dexgram is thinking...",
-			ReplyMarkup:         turnControlMarkup(actionToken, false),
-			DisableNotification: true,
-		})
-		if err == nil {
-			tgTurn.StatusMessageID = status.ID
-		}
 	}
 	a.addSessionTurn(key, tgTurn)
 	for _, ev := range a.takePendingTurnEvents(key, turnID) {
@@ -163,9 +232,6 @@ func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, m
 			a.endSessionStartingTurn(key, session)
 			return
 		}
-	}
-	if !queued {
-		a.endSessionStartingTurn(key, session)
 	}
 	a.startTypingIndicator(key, chatID, messageThreadID)
 }

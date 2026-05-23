@@ -684,6 +684,10 @@ func (a *app) handleTopicSessionEvent(ctx context.Context, key string, session *
 		}
 		if json.Unmarshal(ev.Params, &started) == nil {
 			tgTurn := a.sessionTurn(key, started.Turn.ID)
+			if tgTurn == nil && started.ThreadID == session.threadID && started.Turn.ID != "" && a.sessionStartingTurn(key, session) {
+				tgTurn = a.promoteStartingSessionTurn(key, "", started.Turn.ID)
+				a.markTelegramTurn(session.threadID, started.Turn.ID, session.conv.ChatID, session.conv.MessageThreadID, 0)
+			}
 			if tgTurn == nil && started.ThreadID == session.threadID && started.Turn.ID != "" {
 				tgTurn = &telegramTurn{
 					TurnID:          started.Turn.ID,
