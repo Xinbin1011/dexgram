@@ -24,6 +24,42 @@ func TestStartupFallbackContentUsesCmdCompatibleQuotes(t *testing.T) {
 	}
 }
 
+func TestStartupFallbackContentStartsDirectCommandWhenAlreadyLogged(t *testing.T) {
+	command := `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Start-Process -FilePath 'C:\Users\Yashau\AppData\Local\Dexgram\dexgram.exe' -ArgumentList @('-config', 'C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.toml', '-log', 'C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.log') -WindowStyle Hidden"`
+
+	got := startupFallbackContent(command, "")
+
+	if strings.Contains(got, "cmd.exe /d /c") {
+		t.Fatalf("startup fallback should not wrap logged direct command in cmd.exe: %q", got)
+	}
+	wantLine := `start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Start-Process -FilePath 'C:\Users\Yashau\AppData\Local\Dexgram\dexgram.exe' -ArgumentList @('-config', 'C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.toml', '-log', 'C:\Users\Yashau\AppData\Roaming\Dexgram\dexgram.log') -WindowStyle Hidden"`
+	if !strings.Contains(got, wantLine+"\r\n") {
+		t.Fatalf("startup fallback content = %q, want line %q", got, wantLine)
+	}
+}
+
+func TestStartupDirectCommandStartsDexgramHidden(t *testing.T) {
+	root := t.TempDir()
+	local := filepath.Join(root, "Local")
+	roaming := filepath.Join(root, "Roaming")
+	t.Setenv("LOCALAPPDATA", local)
+	t.Setenv("APPDATA", roaming)
+
+	got := startupDirectCommand()
+
+	for _, want := range []string{
+		"powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command ",
+		"Start-Process -FilePath ",
+		" -ArgumentList @('-config', ",
+		", '-log', ",
+		") -WindowStyle Hidden",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("startup direct command missing %q: %q", want, got)
+		}
+	}
+}
+
 func TestPrintServiceHelpIncludesTaskAndPaths(t *testing.T) {
 	var out bytes.Buffer
 	printServiceHelp(&out, "dexgram.exe")

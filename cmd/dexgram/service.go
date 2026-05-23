@@ -105,7 +105,7 @@ func serviceInstall() error {
 		if !isAccessDenied(out) {
 			return err
 		}
-		if fallbackErr := installStartupFallback(startupServiceCommand(), logPath); fallbackErr != nil {
+		if fallbackErr := installStartupFallback(startupDirectCommand(), ""); fallbackErr != nil {
 			return fmt.Errorf("%w\nstartup fallback failed: %v", err, fallbackErr)
 		}
 		fmt.Printf("installed Startup login item: %s\n", mustStartupEntryPath())
@@ -161,7 +161,7 @@ func serviceStart() error {
 		if !startupFallbackInstalled() {
 			return fmt.Errorf("service is not installed; run %s service install", filepath.Base(os.Args[0]))
 		}
-		if refreshErr := installStartupFallback(startupServiceCommand(), mustServiceLogPath()); refreshErr != nil {
+		if refreshErr := installStartupFallback(startupDirectCommand(), ""); refreshErr != nil {
 			return refreshErr
 		}
 		return startDexgramDirect()
@@ -290,17 +290,24 @@ func installStartupFallback(command, logPath string) error {
 }
 
 func startupFallbackContent(command, logPath string) string {
-	runCommand := command
+	runLine := "start \"\" /min " + command
 	if logPath != "" {
-		runCommand += " >> " + quoteCmdArg(logPath) + " 2>&1"
+		runCommand := command + " >> " + quoteCmdArg(logPath) + " 2>&1"
+		runLine = "start \"\" /min cmd.exe /d /c " + quoteCmdCommand(runCommand)
 	}
 	return "@echo off\r\n" +
 		"rem Dexgram user-login startup fallback\r\n" +
-		"start \"\" /min cmd.exe /d /c " + quoteCmdCommand(runCommand) + "\r\n"
+		runLine + "\r\n"
 }
 
-func startupServiceCommand() string {
-	return quoteCmdArg(mustServiceExePath()) + " service start"
+func startupDirectCommand() string {
+	script := fmt.Sprintf(
+		"Start-Process -FilePath %s -ArgumentList @('-config', %s, '-log', %s) -WindowStyle Hidden",
+		quotePowerShellString(mustServiceExePath()),
+		quotePowerShellString(mustServiceConfigPath()),
+		quotePowerShellString(mustServiceLogPath()),
+	)
+	return "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command " + quoteCmdArg(script)
 }
 
 func removeStartupFallback() error {
