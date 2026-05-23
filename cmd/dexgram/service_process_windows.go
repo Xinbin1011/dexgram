@@ -16,5 +16,6 @@ const (
 func detachLongRunningCommand(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: detachedProcess | createNewProcessGroup | createNoWindow,
+		HideWindow:    true,
 	}
 }

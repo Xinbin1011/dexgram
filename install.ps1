@@ -171,9 +171,17 @@ if ($isUpdate) {
     Write-Host "Dexgram updated."
     Write-Host "Starting Dexgram service..."
     try {
-        $process = Start-Process -FilePath $exePath -ArgumentList "service", "start" -NoNewWindow -PassThru
+        $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $exePath
+        $startInfo.Arguments = "service start"
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $process = [System.Diagnostics.Process]::Start($startInfo)
         if (-not $process.WaitForExit(30000)) {
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            try {
+                $process.Kill()
+            } catch {
+            }
             Write-Warning "The update was installed, but dexgram service start did not exit within 30 seconds. Run 'dexgram service status' to confirm startup."
         } elseif ($process.ExitCode -ne 0) {
             Write-Warning "dexgram service start exited with code $($process.ExitCode). The update was installed; run 'dexgram service start' to retry startup."
