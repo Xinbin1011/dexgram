@@ -30,6 +30,7 @@ Usage
   %[1]s telegram chatid add <chat_id_or_pairing_code>
   %[1]s telegram token update
   %[1]s update
+  %[1]s status
   %[1]s service <install|start|stop|restart|status|uninstall>
 
 Options
@@ -70,6 +71,12 @@ Version
 
   %[1]s version
       Print the Dexgram version and exit.
+
+Status
+
+  %[1]s status
+      Print the same runtime and Startup login item status as
+      %[1]s service status.
 
 Telegram Config
 

@@ -141,7 +141,7 @@ func serviceStatus() error {
 	printServiceStatusHeader(os.Stdout)
 	printDexgramRuntimeStatus()
 	if startupItemInstalled() {
-		fmt.Printf("Startup login item is installed at %s\n", mustStartupEntryPath())
+		fmt.Println("Startup login item is installed")
 	} else {
 		fmt.Println("Startup login item is not installed")
 	}

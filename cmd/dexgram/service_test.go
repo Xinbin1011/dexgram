@@ -67,6 +67,26 @@ func TestRunServiceCommandHelpAndUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestTopLevelStatusUsesServiceStatus(t *testing.T) {
+	roaming := filepath.Join(t.TempDir(), "Roaming")
+	t.Setenv("APPDATA", roaming)
+	oldArgs := os.Args
+	oldRunningDirect := runningDexgramDirectProcessesFunc
+	defer func() {
+		os.Args = oldArgs
+		runningDexgramDirectProcessesFunc = oldRunningDirect
+	}()
+
+	os.Args = []string{"dexgram.exe", "status"}
+	runningDexgramDirectProcessesFunc = func() ([]string, error) {
+		return nil, nil
+	}
+
+	if err := run(); err != nil {
+		t.Fatalf("top-level status: %v", err)
+	}
+}
+
 func TestQuoteCmdArgDoublesEmbeddedQuotes(t *testing.T) {
 	got := quoteCmdArg(`C:\Users\Name "Quoted"\dexgram.log`)
 	want := `"C:\Users\Name ""Quoted""\dexgram.log"`
