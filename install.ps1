@@ -8,11 +8,66 @@ if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
 
 $repo = "yashau/dexgram"
 $isUpdate = @("1", "true", "yes") -contains ([string]$env:UPDATE).ToLowerInvariant()
+$isUpdateHandoff = @("1", "true", "yes") -contains ([string]$env:DEXGRAM_UPDATE_HANDOFF).ToLowerInvariant()
 $binDir = Join-Path $env:LOCALAPPDATA "Dexgram"
 $configDir = Join-Path $env:APPDATA "Dexgram"
 $exePath = Join-Path $binDir "dexgram.exe"
 $logPath = Join-Path $configDir "dexgram.log"
 $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("dexgram-install-" + [guid]::NewGuid().ToString("N"))
+
+function Get-DexgramUpdateParentPid {
+    if ([string]::IsNullOrWhiteSpace($env:DEXGRAM_UPDATE_PARENT_PID)) {
+        return 0
+    }
+    $parentPid = 0
+    [int]::TryParse($env:DEXGRAM_UPDATE_PARENT_PID, [ref]$parentPid) | Out-Null
+    return $parentPid
+}
+
+function Test-ForegroundUpdateParent {
+    param([int]$ParentPid)
+    if ($ParentPid -le 0) {
+        return $false
+    }
+    try {
+        $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $ParentPid" -ErrorAction Stop
+    } catch {
+        return $false
+    }
+    return $parent.CommandLine -match '(?i)(^|[\\\s"])dexgram(?:\.exe)?["\s]+update(?:\s|$)'
+}
+
+function Start-DexgramUpdateHandoff {
+    param([int]$ParentPid)
+    $launcher = @"
+`$ErrorActionPreference = 'Stop'
+`$env:UPDATE = 'true'
+`$env:DEXGRAM_UPDATE_HANDOFF = 'true'
+`$env:DEXGRAM_UPDATE_PARENT_PID = '$ParentPid'
+try {
+    `$parent = Get-Process -Id $ParentPid -ErrorAction Stop
+    `$parent.WaitForExit(30000) | Out-Null
+} catch {
+}
+try {
+    irm https://raw.githubusercontent.com/yashau/dexgram/main/install.ps1 | iex
+} catch {
+    Write-Error `$_
+    exit 1
+}
+"@
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $encodedLauncher = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($launcher))
+    $startInfo.FileName = "powershell.exe"
+    $startInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encodedLauncher"
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    $null = $process.BeginOutputReadLine()
+    $null = $process.BeginErrorReadLine()
+}
 
 function Convert-DexgramVersion {
     param([string]$Value)
@@ -94,6 +149,15 @@ if ($isUpdate) {
 New-Item -ItemType Directory -Force -Path $binDir, $configDir | Out-Null
 if (-not (Test-Path $logPath)) {
     New-Item -ItemType File -Path $logPath | Out-Null
+}
+
+if ($isUpdate -and -not $isUpdateHandoff) {
+    $updateParentPid = Get-DexgramUpdateParentPid
+    if (Test-ForegroundUpdateParent -ParentPid $updateParentPid) {
+        Start-DexgramUpdateHandoff -ParentPid $updateParentPid
+        Write-Host "Dexgram updater is continuing in the background. Run 'dexgram service status' in a few moments."
+        return
+    }
 }
 
 New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
