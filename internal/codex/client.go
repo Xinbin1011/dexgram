@@ -225,7 +225,7 @@ func betterCodexCandidate(candidate, best codexInstallCandidate) bool {
 func readCodexVersion(path string) (codexVersion, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, path, "--version").Output()
+	output, err := codexCommand(ctx, path, "--version").Output()
 	if err != nil {
 		return codexVersion{}, false
 	}

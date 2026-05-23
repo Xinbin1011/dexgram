@@ -62,6 +62,8 @@ func TestUpdatePowerShellScriptCarriesParentProcess(t *testing.T) {
 		"$env:UPDATE='true'",
 		"$env:DEXGRAM_UPDATE_PARENT_PID='1234'",
 		installScriptURL,
+		"exit 0",
+		"exit 1",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("update script missing %q: %q", want, got)

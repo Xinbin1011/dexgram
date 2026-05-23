@@ -63,6 +63,7 @@ func runUpdateScript(parentPID int, stdin io.Reader, stdout, stderr io.Writer) e
 func startUpdateProcess(logPath string) error {
 	script := updatePowerShellScript(os.Getpid())
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	detachLongRunningCommand(cmd)
 	var logFile *os.File
 	if strings.TrimSpace(logPath) != "" {
 		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
@@ -99,7 +100,7 @@ func startUpdateProcess(logPath string) error {
 
 func updatePowerShellScript(parentPID int) string {
 	return fmt.Sprintf(
-		"$env:UPDATE='true'; $env:DEXGRAM_UPDATE_PARENT_PID='%s'; irm %s | iex",
+		"$ErrorActionPreference='Stop'; try { $env:UPDATE='true'; $env:DEXGRAM_UPDATE_PARENT_PID='%s'; irm %s | iex; exit 0 } catch { Write-Error $_; exit 1 }",
 		strconv.Itoa(parentPID),
 		installScriptURL,
 	)

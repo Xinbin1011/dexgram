@@ -4,4 +4,4 @@ package codex
 
 import "os/exec"
 
-func configureAppServerProcess(_ *exec.Cmd) {}
+func configureCodexProcess(_ *exec.Cmd) {}

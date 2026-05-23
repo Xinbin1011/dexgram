@@ -12,7 +12,7 @@ const (
 	createNoWindow        = 0x08000000
 )
 
-func configureAppServerProcess(cmd *exec.Cmd) {
+func configureCodexProcess(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: createNewProcessGroup | createNoWindow,
 	}

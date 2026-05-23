@@ -19,3 +19,8 @@ func assertAppServerCommandIsolated(t *testing.T, cmd *exec.Cmd) {
 		t.Fatalf("CreationFlags = %#x, want CREATE_NO_WINDOW", cmd.SysProcAttr.CreationFlags)
 	}
 }
+
+func TestCodexCommandIsIsolated(t *testing.T) {
+	cmd := codexCommand(t.Context(), `C:\Codex\codex.exe`, "--version")
+	assertAppServerCommandIsolated(t, cmd)
+}

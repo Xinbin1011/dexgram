@@ -85,17 +85,6 @@ function Copy-DexgramExecutable {
     throw $lastError
 }
 
-function Write-DexgramUpdatePrompt {
-    if (-not $isUpdate) {
-        return
-    }
-    if ([string]::IsNullOrWhiteSpace($env:DEXGRAM_UPDATE_PARENT_PID)) {
-        return
-    }
-
-    [Console]::Out.Write("PS $((Get-Location).Path)> ")
-}
-
 if ($isUpdate) {
     Write-Host "Updating Dexgram..."
 } else {
@@ -125,7 +114,6 @@ try {
         $latestVersion = Convert-DexgramVersion $release.tag_name
         if ($installedVersion -and $latestVersion -and $installedVersion -ge $latestVersion) {
             Write-Host "Dexgram is already up to date ($($installedInfo.FileVersion))."
-            Write-DexgramUpdatePrompt
             return
         }
     }
@@ -188,7 +176,6 @@ if ($isUpdate) {
     }
     Write-Host "Next: dexgram service status"
     Write-Host ""
-    Write-DexgramUpdatePrompt
     return
 }
 
