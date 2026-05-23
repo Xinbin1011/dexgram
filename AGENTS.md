@@ -44,7 +44,8 @@ Run the shared local/CI check before handing work back:
 
 This is the same entry point GitHub Actions uses after setting up Go from
 `go.mod`. It verifies `gofmt`, runs `go test ./...`, runs
-`go test -cover ./...`, and runs `golangci-lint run ./...`.
+`go test -cover ./...`, runs `golangci-lint run ./...`, and rejects tracked Go
+files over 1000 lines.
 
 The repo linter config is `.golangci.yml`; `errcheck` and `staticcheck` are
 explicitly enabled there. The check script pins `golangci-lint` to `v1.64.8`

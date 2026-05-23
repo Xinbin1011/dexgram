@@ -58,6 +58,26 @@ if ($files) {
     exit 1
 }
 
+Write-Host "Checking Go file line counts..."
+$maxGoFileLines = 1000
+$tooLongGoFiles = @()
+foreach ($file in git ls-files --cached --others --exclude-standard "*.go") {
+    $lineCount = (Get-Content -LiteralPath $file | Measure-Object -Line).Lines
+    if ($lineCount -gt $maxGoFileLines) {
+        $tooLongGoFiles += [pscustomobject]@{
+            Path = $file
+            Lines = $lineCount
+        }
+    }
+}
+if ($tooLongGoFiles) {
+    $tooLongGoFiles |
+        Sort-Object Lines -Descending |
+        ForEach-Object { Write-Host ("{0}: {1} lines" -f $_.Path, $_.Lines) }
+    Write-Error "Go files must be $maxGoFileLines lines or fewer. Split the files listed above."
+    exit 1
+}
+
 Write-Host "Running tests..."
 go test ./...
 
