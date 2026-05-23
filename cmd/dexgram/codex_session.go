@@ -126,7 +126,7 @@ func (a *app) activeCodexTurnsBestEffort(ctx context.Context, c *codex.Client, t
 		log.Printf("read active Codex turns after resume thread_id=%s: %v", threadID, err)
 		return nil
 	}
-	return activeCodexTurns(read.Thread)
+	return a.activeCodexTurnsForResumedSession(threadID, read.Thread)
 }
 
 func activeCodexTurns(thread codex.Thread) []codex.Turn {
@@ -137,6 +137,30 @@ func activeCodexTurns(thread codex.Thread) []codex.Turn {
 		}
 	}
 	return active
+}
+
+func (a *app) activeCodexTurnsForResumedSession(threadID string, thread codex.Thread) []codex.Turn {
+	var active []codex.Turn
+	for _, turn := range activeCodexTurns(thread) {
+		if a.knownTelegramTurnBestEffort(threadID, turn.ID) {
+			log.Printf("ignoring stale resumed Telegram turn thread_id=%s turn_id=%s status=%s", threadID, turn.ID, turn.Status)
+			continue
+		}
+		active = append(active, turn)
+	}
+	return active
+}
+
+func (a *app) knownTelegramTurnBestEffort(threadID, turnID string) bool {
+	if a == nil || a.store == nil || strings.TrimSpace(threadID) == "" || strings.TrimSpace(turnID) == "" {
+		return false
+	}
+	ok, err := a.store.IsTelegramTurn(threadID, turnID)
+	if err != nil {
+		log.Printf("read Telegram turn marker thread_id=%s turn_id=%s: %v", threadID, turnID, err)
+		return false
+	}
+	return ok
 }
 
 func (a *app) shouldQueuePrompt(ctx context.Context, key string, session *activeTurn) bool {
@@ -153,6 +177,11 @@ func (a *app) shouldQueuePrompt(ctx context.Context, key string, session *active
 		return current != "" || a.sessionTurnCount(key) > 0
 	}
 	if active.ID == "" {
+		a.removeActiveSessionTurns(key)
+		return false
+	}
+	if a.knownTelegramTurnBestEffort(session.threadID, active.ID) {
+		log.Printf("ignoring stale active Telegram turn before prompt submit thread_id=%s turn_id=%s status=%s", session.threadID, active.ID, active.Status)
 		a.removeActiveSessionTurns(key)
 		return false
 	}

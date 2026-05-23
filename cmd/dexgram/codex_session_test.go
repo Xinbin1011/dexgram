@@ -115,6 +115,28 @@ func TestActiveCodexTurnsFiltersTerminalTurns(t *testing.T) {
 	}
 }
 
+func TestActiveCodexTurnsForResumedSessionIgnoresKnownTelegramTurns(t *testing.T) {
+	store, err := state.Open(filepath.Join(t.TempDir(), "dexgram.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeTestStateStore(t, store)
+	if err := store.SaveTelegramTurn("thread-1", "telegram-turn", 123, 7, 42); err != nil {
+		t.Fatal(err)
+	}
+	app := &app{store: store}
+
+	got := app.activeCodexTurnsForResumedSession("thread-1", codex.Thread{Turns: []codex.Turn{
+		{ID: "telegram-turn", Status: "running"},
+		{ID: "desktop-turn", Status: "running"},
+		{ID: "done", Status: "completed"},
+	}})
+
+	if len(got) != 1 || got[0].ID != "desktop-turn" {
+		t.Fatalf("active turns = %#v", got)
+	}
+}
+
 func TestSeedSessionAutonomousTurnsTracksResumedActiveGoalTurn(t *testing.T) {
 	session := &activeTurn{
 		conv: state.Conversation{
