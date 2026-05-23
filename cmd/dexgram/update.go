@@ -1,9 +1,13 @@
 package main
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,18 +17,23 @@ import (
 	"time"
 )
 
-const installScriptURL = "https://raw.githubusercontent.com/yashau/dexgram/main/install.ps1"
 const latestReleaseURL = "https://api.github.com/repos/yashau/dexgram/releases/latest"
 
 type githubRelease struct {
-	TagName string `json:"tag_name"`
+	TagName string        `json:"tag_name"`
+	Assets  []githubAsset `json:"assets"`
+}
+
+type githubAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
 func runUpdateCommand() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	latest, cmp, err := latestUpdateComparison(ctx, appVersion)
+	release, cmp, err := latestUpdateComparison(ctx, appVersion)
 	if err != nil {
 		return err
 	}
@@ -34,33 +43,54 @@ func runUpdateCommand() error {
 		return nil
 	}
 
-	fmt.Printf("Updating Dexgram %s -> %s...\n\n", appVersion, strings.TrimPrefix(latest, "v"))
-	if err := startUpdateProcessWithOptions("", true); err != nil {
-		return err
-	}
-	fmt.Println("Dexgram updater started. This command can exit while the updater replaces the binary and restarts Dexgram.")
-	return nil
+	fmt.Printf("Updating Dexgram %s -> %s...\n\n", appVersion, strings.TrimPrefix(release.TagName, "v"))
+	return runUpdateWorkflow(ctx, release, os.Stdout)
 }
 
-func latestUpdateComparison(ctx context.Context, current string) (string, int, error) {
-	latest, err := latestReleaseTag(ctx)
-	if err != nil {
-		return "", 0, err
+func runUpdateHelperCommand(args []string) error {
+	fs := flag.NewFlagSet("__update-helper", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var parentPID int
+	fs.IntVar(&parentPID, "parent-pid", 0, "process id that launched the helper")
+	if err := fs.Parse(args); err != nil {
+		return err
 	}
-	cmp, err := compareVersions(current, latest)
-	if err != nil {
-		return "", 0, err
+	if parentPID > 0 {
+		stopProcess(parentPID)
 	}
-	return latest, cmp, nil
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	release, cmp, err := latestUpdateComparison(ctx, appVersion)
+	if err != nil {
+		return err
+	}
+	if cmp >= 0 {
+		fmt.Printf("Dexgram is already up to date (%s).\n", appVersion)
+		return nil
+	}
+	fmt.Printf("Updating Dexgram %s -> %s...\n\n", appVersion, strings.TrimPrefix(release.TagName, "v"))
+	return runUpdateWorkflow(ctx, release, os.Stdout)
+}
+
+func latestUpdateComparison(ctx context.Context, current string) (githubRelease, int, error) {
+	release, err := latestRelease(ctx)
+	if err != nil {
+		return githubRelease{}, 0, err
+	}
+	cmp, err := compareVersions(current, release.TagName)
+	if err != nil {
+		return githubRelease{}, 0, err
+	}
+	return release, cmp, nil
 }
 
 func startUpdateProcess(logPath string) error {
-	return startUpdateProcessWithOptions(logPath, false)
-}
-
-func startUpdateProcessWithOptions(logPath string, waitForParentExit bool) error {
-	script := updatePowerShellScript(os.Getpid(), waitForParentExit)
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	helperPath, err := copySelfToUpdateHelper()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(helperPath, "__update-helper", "-parent-pid", strconv.Itoa(os.Getpid()))
 	detachLongRunningCommand(cmd)
 	var logFile *os.File
 	if strings.TrimSpace(logPath) != "" {
@@ -75,8 +105,8 @@ func startUpdateProcessWithOptions(logPath string, waitForParentExit bool) error
 		cmd.Stdout = f
 		cmd.Stderr = f
 	} else {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
 	}
 	if err := cmd.Start(); err != nil {
 		if logFile != nil {
@@ -96,45 +126,293 @@ func startUpdateProcessWithOptions(logPath string, waitForParentExit bool) error
 	return nil
 }
 
-func updatePowerShellScript(parentPID int, waitForParentExit bool) string {
-	waitValue := "false"
-	if waitForParentExit {
-		waitValue = "true"
+func copySelfToUpdateHelper() (string, error) {
+	current, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve current executable: %w", err)
 	}
-	return fmt.Sprintf(
-		"$ErrorActionPreference='Stop'; try { $env:UPDATE='true'; $env:DEXGRAM_UPDATE_PARENT_PID='%s'; $env:DEXGRAM_UPDATE_WAIT_PARENT='%s'; if ($env:DEXGRAM_UPDATE_WAIT_PARENT -eq 'true') { try { $p = Get-Process -Id %s -ErrorAction Stop; $p.WaitForExit(10000) | Out-Null } catch {} }; irm %s | iex; exit 0 } catch { Write-Error $_; exit 1 }",
-		strconv.Itoa(parentPID),
-		waitValue,
-		strconv.Itoa(parentPID),
-		installScriptURL,
-	)
+	helperDir := filepath.Join(os.TempDir(), "dexgram-update-"+strconv.Itoa(os.Getpid()))
+	if err := os.MkdirAll(helperDir, 0o755); err != nil {
+		return "", fmt.Errorf("create updater helper directory: %w", err)
+	}
+	helperPath := filepath.Join(helperDir, "dexgram-update-helper.exe")
+	if err := copyFile(current, helperPath); err != nil {
+		return "", fmt.Errorf("copy updater helper: %w", err)
+	}
+	return helperPath, nil
 }
 
-func latestReleaseTag(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestReleaseURL, nil)
+func runUpdateWorkflow(ctx context.Context, release githubRelease, w io.Writer) error {
+	asset, ok := selectReleaseAsset(release.Assets)
+	if !ok {
+		return fmt.Errorf("could not find a .exe or .zip asset in the latest release")
+	}
+	tmpDir, err := os.MkdirTemp("", "dexgram-update-*")
 	if err != nil {
+		return fmt.Errorf("create update temp directory: %w", err)
+	}
+	defer func() {
+		_ = os.RemoveAll(tmpDir)
+	}()
+
+	fmt.Fprintf(w, "Downloading %s from %s...\n", asset.Name, release.TagName)
+	sourceExe, err := downloadReleaseExecutable(ctx, asset, tmpDir)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintln(w, "Stopping running Dexgram...")
+	if err := stopDexgramForUpdate(w); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(w, "Replacing %s...\n", mustServiceExePath())
+	if err := replaceDexgramExecutable(sourceExe, mustServiceExePath()); err != nil {
+		return err
+	}
+
+	fmt.Fprintln(w, "Starting Dexgram service...")
+	if err := serviceStart(); err != nil {
+		return fmt.Errorf("start Dexgram service after update: %w", err)
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Dexgram updated to %s.\n", cleanVersion(release.TagName))
+	return nil
+}
+
+func selectReleaseAsset(assets []githubAsset) (githubAsset, bool) {
+	for _, asset := range assets {
+		if strings.EqualFold(filepath.Ext(asset.Name), ".exe") {
+			return asset, true
+		}
+	}
+	for _, asset := range assets {
+		name := strings.ToLower(asset.Name)
+		if filepath.Ext(name) == ".zip" &&
+			(strings.Contains(name, "windows") || strings.Contains(name, "win") || strings.Contains(name, "amd64") || strings.Contains(name, "x64")) {
+			return asset, true
+		}
+	}
+	for _, asset := range assets {
+		if strings.EqualFold(filepath.Ext(asset.Name), ".zip") {
+			return asset, true
+		}
+	}
+	return githubAsset{}, false
+}
+
+func downloadReleaseExecutable(ctx context.Context, asset githubAsset, tmpDir string) (string, error) {
+	if strings.TrimSpace(asset.BrowserDownloadURL) == "" {
+		return "", fmt.Errorf("release asset %q has no download URL", asset.Name)
+	}
+	downloadPath := filepath.Join(tmpDir, asset.Name)
+	if err := downloadFile(ctx, asset.BrowserDownloadURL, downloadPath); err != nil {
 		return "", err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
+	if strings.EqualFold(filepath.Ext(asset.Name), ".exe") {
+		return downloadPath, nil
+	}
+	extractDir := filepath.Join(tmpDir, "extract")
+	if err := unzipFile(downloadPath, extractDir); err != nil {
+		return "", err
+	}
+	var found string
+	err := filepath.WalkDir(extractDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if found == "" && !entry.IsDir() && strings.EqualFold(entry.Name(), "dexgram.exe") {
+			found = path
+		}
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("inspect release archive: %w", err)
+	}
+	if found == "" {
+		return "", fmt.Errorf("release archive did not contain dexgram.exe")
+	}
+	return found, nil
+}
+
+func downloadFile(ctx context.Context, url, path string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
 	req.Header.Set("User-Agent", "dexgram-updater")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("check latest release: GitHub returned HTTP %d", resp.StatusCode)
+		return fmt.Errorf("download release asset: HTTP %d", resp.StatusCode)
+	}
+	out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = out.Close()
+	}()
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		return err
+	}
+	return nil
+}
+
+func unzipFile(zipPath, destDir string) error {
+	reader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return fmt.Errorf("open release archive: %w", err)
+	}
+	defer func() {
+		_ = reader.Close()
+	}()
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return err
+	}
+	for _, file := range reader.File {
+		cleanName := filepath.Clean(file.Name)
+		if strings.HasPrefix(cleanName, "..") || filepath.IsAbs(cleanName) {
+			return fmt.Errorf("release archive contains unsafe path %q", file.Name)
+		}
+		target := filepath.Join(destDir, cleanName)
+		if file.FileInfo().IsDir() {
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		in, err := file.Open()
+		if err != nil {
+			return err
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, file.FileInfo().Mode())
+		if err != nil {
+			_ = in.Close()
+			return err
+		}
+		_, copyErr := io.Copy(out, in)
+		closeErr := out.Close()
+		inErr := in.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if inErr != nil {
+			return inErr
+		}
+	}
+	return nil
+}
+
+func stopDexgramForUpdate(w io.Writer) error {
+	_, _ = runSchtasks("/End", "/TN", serviceTaskName)
+	stopped, err := stopDexgramDirectProcessesFunc()
+	if err != nil {
+		return err
+	}
+	for _, line := range stopped {
+		fmt.Fprintln(w, "stopped Dexgram process "+line)
+	}
+	return nil
+}
+
+func replaceDexgramExecutable(source, destination string) error {
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return fmt.Errorf("create binary directory: %w", err)
+	}
+	backup := destination + ".old-" + time.Now().Format("20060102150405")
+	if err := removeOldDexgramBackups(filepath.Dir(destination)); err != nil {
+		return err
+	}
+	if err := os.Rename(destination, backup); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("move existing executable aside: %w", err)
+	}
+	if err := copyFile(source, destination); err != nil {
+		if _, statErr := os.Stat(destination); errors.Is(statErr, os.ErrNotExist) {
+			_ = os.Rename(backup, destination)
+		}
+		return fmt.Errorf("copy replacement executable: %w", err)
+	}
+	_ = os.Remove(backup)
+	return nil
+}
+
+func removeOldDexgramBackups(dir string) error {
+	matches, err := filepath.Glob(filepath.Join(dir, "dexgram.exe.old-*"))
+	if err != nil {
+		return err
+	}
+	for _, match := range matches {
+		_ = os.Remove(match)
+	}
+	return nil
+}
+
+func copyFile(source, destination string) error {
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = in.Close()
+	}()
+	out, err := os.OpenFile(destination, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
+}
+
+func stopProcess(pid int) {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	_ = process.Kill()
+	_, _ = process.Wait()
+}
+
+func latestRelease(ctx context.Context) (githubRelease, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestReleaseURL, nil)
+	if err != nil {
+		return githubRelease{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "dexgram-updater")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return githubRelease{}, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return githubRelease{}, fmt.Errorf("check latest release: GitHub returned HTTP %d", resp.StatusCode)
 	}
 	var release githubRelease
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return "", err
+		return githubRelease{}, err
 	}
 	if strings.TrimSpace(release.TagName) == "" {
-		return "", fmt.Errorf("check latest release: latest release has no tag")
+		return githubRelease{}, fmt.Errorf("check latest release: latest release has no tag")
 	}
-	return release.TagName, nil
+	return release, nil
 }
 
 func compareVersions(current, latest string) (int, error) {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -56,31 +55,26 @@ func TestVersionPartsRejectsMalformedVersions(t *testing.T) {
 	}
 }
 
-func TestUpdatePowerShellScriptCarriesParentProcess(t *testing.T) {
-	got := updatePowerShellScript(1234, false)
-	for _, want := range []string{
-		"$env:UPDATE='true'",
-		"$env:DEXGRAM_UPDATE_PARENT_PID='1234'",
-		"$env:DEXGRAM_UPDATE_WAIT_PARENT='false'",
-		installScriptURL,
-		"exit 0",
-		"exit 1",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("update script missing %q: %q", want, got)
-		}
+func TestSelectReleaseAssetPrefersExeThenWindowsZip(t *testing.T) {
+	asset, ok := selectReleaseAsset([]githubAsset{
+		{Name: "dexgram-linux.zip"},
+		{Name: "dexgram.exe"},
+		{Name: "dexgram-windows-amd64.zip"},
+	})
+	if !ok || asset.Name != "dexgram.exe" {
+		t.Fatalf("selected asset = %#v, %v", asset, ok)
 	}
-}
 
-func TestUpdatePowerShellScriptCanWaitForParentExit(t *testing.T) {
-	got := updatePowerShellScript(1234, true)
-	for _, want := range []string{
-		"$env:DEXGRAM_UPDATE_WAIT_PARENT='true'",
-		"Get-Process -Id 1234",
-		"WaitForExit(10000)",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("update script missing %q: %q", want, got)
-		}
+	asset, ok = selectReleaseAsset([]githubAsset{
+		{Name: "dexgram.zip"},
+		{Name: "dexgram-windows-amd64.zip"},
+	})
+	if !ok || asset.Name != "dexgram-windows-amd64.zip" {
+		t.Fatalf("selected asset = %#v, %v", asset, ok)
+	}
+
+	asset, ok = selectReleaseAsset([]githubAsset{{Name: "dexgram.zip"}})
+	if !ok || asset.Name != "dexgram.zip" {
+		t.Fatalf("selected asset = %#v, %v", asset, ok)
 	}
 }

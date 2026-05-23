@@ -45,6 +45,9 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "__update-helper" {
+		return runUpdateHelperCommand(os.Args[2:])
+	}
 	if len(os.Args) > 1 && os.Args[1] == "service" {
 		return runServiceCommand(os.Args[2:])
 	}

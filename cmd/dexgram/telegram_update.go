@@ -26,7 +26,7 @@ func (a *app) handleUpdateCommand(ctx context.Context, b *bot.Bot, msg *models.M
 	checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	latest, cmp, err := latestUpdateComparison(checkCtx, appVersion)
+	release, cmp, err := latestUpdateComparison(checkCtx, appVersion)
 	if err != nil {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          msg.Chat.ID,
@@ -35,7 +35,7 @@ func (a *app) handleUpdateCommand(ctx context.Context, b *bot.Bot, msg *models.M
 		})
 		return
 	}
-	targetVersion := cleanVersion(latest)
+	targetVersion := cleanVersion(release.TagName)
 	if cmp >= 0 {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          msg.Chat.ID,
