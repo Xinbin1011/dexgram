@@ -131,19 +131,6 @@ func (a *app) handleGoalStatus(ctx context.Context, b *bot.Bot, msg *models.Mess
 		})
 		return
 	}
-	if goal == nil || strings.TrimSpace(goal.Objective) == "" {
-		paused, ok, err := a.getPausedTopicGoal(msg.Chat.ID, msg.MessageThreadID)
-		if err != nil {
-			log.Printf("get paused codex goal failed: %v", err)
-		} else if ok {
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID:          msg.Chat.ID,
-				MessageThreadID: msg.MessageThreadID,
-				Text:            formatPausedGoalStatus(paused),
-			})
-			return
-		}
-	}
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          msg.Chat.ID,
 		MessageThreadID: msg.MessageThreadID,
@@ -226,13 +213,6 @@ func formatGoalStatus(goal *codex.ThreadGoal, now time.Time) string {
 		}
 	}
 	return strings.Join(lines, "\n")
-}
-
-func formatPausedGoalStatus(objective string) string {
-	return "Codex goal paused\n" +
-		"Objective:\n" + objective + "\n\n" +
-		"Resume: /goal resume\n" +
-		"Clear: /goal clear"
 }
 
 func isCodexGoalsDisabledError(err error) bool {

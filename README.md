@@ -245,10 +245,10 @@ Commands are registered only for authorized chats.
 - `/steer <message>` steers the currently active Codex turn.
 - `/goal` shows the current native Codex goal for the topic. `/goal <objective>`
   sets the same thread goal Codex Desktop uses; Dexgram does not track a
-  separate active goal. `/goal pause` stores a temporary paused snapshot by Codex
-  thread id, then clears it in Codex. `/goal resume` restores that shared Codex
-  goal. `/goal clear` clears without storing it; `delete`, `remove`, `stop`,
-  `off`, and `none` are aliases.
+  separate active goal. `/goal pause` marks the shared Codex goal paused, and
+  `/goal resume` marks it active again, so Desktop and Telegram see the same
+  goal state. `/goal clear` removes it; `delete`, `remove`, `stop`, `off`, and
+  `none` are aliases.
 - `/plan <message>` starts a Codex Plan Mode turn.
 - `/settings` shows Telegram-started Plan Mode settings.
 - `/model [model-id|auto]` chooses the Plan Mode model.

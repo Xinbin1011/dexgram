@@ -60,17 +60,9 @@ func (a *app) setTopicGoal(ctx context.Context, chatID int64, messageThreadID in
 }
 
 func (a *app) clearTopicGoal(ctx context.Context, chatID int64, messageThreadID int) error {
-	var clearedThreadID string
-	if err := a.withExistingTopicCodexClient(ctx, chatID, messageThreadID, func(c *codex.Client, threadID string) error {
-		clearedThreadID = threadID
+	return a.withExistingTopicCodexClient(ctx, chatID, messageThreadID, func(c *codex.Client, threadID string) error {
 		return clearThreadGoal(ctx, c, threadID)
-	}); err != nil {
-		return err
-	}
-	if clearedThreadID == "" {
-		return nil
-	}
-	return a.store.DeletePausedGoal(clearedThreadID)
+	})
 }
 
 func (a *app) getTopicGoal(ctx context.Context, chatID int64, messageThreadID int) (*codex.ThreadGoal, error) {
@@ -94,16 +86,7 @@ func (a *app) pauseTopicGoal(ctx context.Context, chatID int64, messageThreadID 
 			return fmt.Errorf("no Codex goal is set for this thread")
 		}
 		objective = strings.TrimSpace(goal.Objective)
-		if err := a.store.SavePausedGoal(threadID, objective); err != nil {
-			return err
-		}
-		if err := clearThreadGoal(ctx, c, threadID); err != nil {
-			if deleteErr := a.store.DeletePausedGoal(threadID); deleteErr != nil {
-				log.Printf("rollback paused goal after clear failure thread_id=%s: %v", threadID, deleteErr)
-			}
-			return err
-		}
-		return nil
+		return setThreadGoalStatus(ctx, c, threadID, "paused")
 	})
 	return objective, err
 }
@@ -111,60 +94,24 @@ func (a *app) pauseTopicGoal(ctx context.Context, chatID int64, messageThreadID 
 func (a *app) resumeTopicGoal(ctx context.Context, chatID int64, messageThreadID int) (string, error) {
 	var objective string
 	err := a.withExistingTopicCodexClient(ctx, chatID, messageThreadID, func(c *codex.Client, threadID string) error {
-		paused, ok, err := a.store.GetPausedGoal(threadID)
+		goal, err := getThreadGoal(ctx, c, threadID)
 		if err != nil {
 			return err
 		}
-		if ok {
-			objective = strings.TrimSpace(paused.Objective)
-		}
+		objective = goalObjective(goal)
 		if objective == "" {
-			goal, err := getThreadGoal(ctx, c, threadID)
-			if err != nil {
-				return err
-			}
-			objective = pausedGoalObjective(goal)
+			return fmt.Errorf("no paused Codex goal is set for this thread")
 		}
-		if objective == "" {
-			return fmt.Errorf("no paused Codex goal is stored or active for this thread")
-		}
-		if err := setThreadGoal(ctx, c, threadID, objective); err != nil {
-			return err
-		}
-		if ok {
-			return a.store.DeletePausedGoal(threadID)
-		}
-		return nil
+		return setThreadGoalStatus(ctx, c, threadID, "active")
 	})
 	return objective, err
 }
 
-func pausedGoalObjective(goal *codex.ThreadGoal) string {
-	if goal == nil || !strings.EqualFold(strings.TrimSpace(goal.Status), "paused") {
+func goalObjective(goal *codex.ThreadGoal) string {
+	if goal == nil {
 		return ""
 	}
 	return strings.TrimSpace(goal.Objective)
-}
-
-func (a *app) getPausedTopicGoal(chatID int64, messageThreadID int) (string, bool, error) {
-	key := fmt.Sprintf("%d:%d", chatID, messageThreadID)
-	if session := a.activeSession(key); session != nil {
-		return a.getPausedThreadGoal(session.threadID)
-	}
-	conv, ok, err := a.store.Get(chatID, messageThreadID)
-	if err != nil || !ok || conv.CodexThreadID == "" {
-		return "", false, err
-	}
-	return a.getPausedThreadGoal(conv.CodexThreadID)
-}
-
-func (a *app) getPausedThreadGoal(threadID string) (string, bool, error) {
-	paused, ok, err := a.store.GetPausedGoal(threadID)
-	if err != nil || !ok {
-		return "", false, err
-	}
-	objective := strings.TrimSpace(paused.Objective)
-	return objective, objective != "", nil
 }
 
 func (a *app) withExistingTopicCodexClient(ctx context.Context, chatID int64, messageThreadID int, fn func(*codex.Client, string) error) error {
@@ -228,6 +175,14 @@ func clearThreadGoal(ctx context.Context, c *codex.Client, threadID string) erro
 	var out map[string]any
 	return c.Call(ctx, "thread/goal/clear", map[string]any{
 		"threadId": threadID,
+	}, &out)
+}
+
+func setThreadGoalStatus(ctx context.Context, c *codex.Client, threadID, status string) error {
+	var out codex.ThreadGoalGetResponse
+	return c.Call(ctx, "thread/goal/set", map[string]any{
+		"threadId": threadID,
+		"status":   status,
 	}, &out)
 }
 
