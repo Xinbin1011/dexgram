@@ -57,13 +57,27 @@ func TestVersionPartsRejectsMalformedVersions(t *testing.T) {
 }
 
 func TestUpdatePowerShellScriptCarriesParentProcess(t *testing.T) {
-	got := updatePowerShellScript(1234)
+	got := updatePowerShellScript(1234, false)
 	for _, want := range []string{
 		"$env:UPDATE='true'",
 		"$env:DEXGRAM_UPDATE_PARENT_PID='1234'",
+		"$env:DEXGRAM_UPDATE_WAIT_PARENT='false'",
 		installScriptURL,
 		"exit 0",
 		"exit 1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("update script missing %q: %q", want, got)
+		}
+	}
+}
+
+func TestUpdatePowerShellScriptCanWaitForParentExit(t *testing.T) {
+	got := updatePowerShellScript(1234, true)
+	for _, want := range []string{
+		"$env:DEXGRAM_UPDATE_WAIT_PARENT='true'",
+		"Get-Process -Id 1234",
+		"WaitForExit(10000)",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("update script missing %q: %q", want, got)

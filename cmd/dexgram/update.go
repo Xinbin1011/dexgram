@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -36,7 +35,11 @@ func runUpdateCommand() error {
 	}
 
 	fmt.Printf("Updating Dexgram %s -> %s...\n\n", appVersion, strings.TrimPrefix(latest, "v"))
-	return runUpdateScript(os.Getpid(), os.Stdin, os.Stdout, os.Stderr)
+	if err := startUpdateProcessWithOptions("", true); err != nil {
+		return err
+	}
+	fmt.Println("Dexgram updater started. This command can exit while the updater replaces the binary and restarts Dexgram.")
+	return nil
 }
 
 func latestUpdateComparison(ctx context.Context, current string) (string, int, error) {
@@ -51,17 +54,12 @@ func latestUpdateComparison(ctx context.Context, current string) (string, int, e
 	return latest, cmp, nil
 }
 
-func runUpdateScript(parentPID int, stdin io.Reader, stdout, stderr io.Writer) error {
-	script := updatePowerShellScript(parentPID)
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
-	cmd.Stdin = stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	return cmd.Run()
+func startUpdateProcess(logPath string) error {
+	return startUpdateProcessWithOptions(logPath, false)
 }
 
-func startUpdateProcess(logPath string) error {
-	script := updatePowerShellScript(os.Getpid())
+func startUpdateProcessWithOptions(logPath string, waitForParentExit bool) error {
+	script := updatePowerShellScript(os.Getpid(), waitForParentExit)
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
 	detachLongRunningCommand(cmd)
 	var logFile *os.File
@@ -98,9 +96,15 @@ func startUpdateProcess(logPath string) error {
 	return nil
 }
 
-func updatePowerShellScript(parentPID int) string {
+func updatePowerShellScript(parentPID int, waitForParentExit bool) string {
+	waitValue := "false"
+	if waitForParentExit {
+		waitValue = "true"
+	}
 	return fmt.Sprintf(
-		"$ErrorActionPreference='Stop'; try { $env:UPDATE='true'; $env:DEXGRAM_UPDATE_PARENT_PID='%s'; irm %s | iex; exit 0 } catch { Write-Error $_; exit 1 }",
+		"$ErrorActionPreference='Stop'; try { $env:UPDATE='true'; $env:DEXGRAM_UPDATE_PARENT_PID='%s'; $env:DEXGRAM_UPDATE_WAIT_PARENT='%s'; if ($env:DEXGRAM_UPDATE_WAIT_PARENT -eq 'true') { try { $p = Get-Process -Id %s -ErrorAction Stop; $p.WaitForExit(10000) | Out-Null } catch {} }; irm %s | iex; exit 0 } catch { Write-Error $_; exit 1 }",
+		strconv.Itoa(parentPID),
+		waitValue,
 		strconv.Itoa(parentPID),
 		installScriptURL,
 	)
