@@ -57,11 +57,6 @@ type codexUserMessageEventPayload struct {
 	TextElements []any  `json:"text_elements"`
 }
 
-type codexTaskPayload struct {
-	Type   string `json:"type"`
-	TurnID string `json:"turn_id"`
-}
-
 type bufferWriteCloser struct {
 	*bytes.Buffer
 }
@@ -241,42 +236,6 @@ func recordPayloadType(record codexJSONLRecord) string {
 		return ""
 	}
 	return header.Type
-}
-
-func activeCodexSessionTurnID(threadID string) (string, bool, error) {
-	path, ok := codexSessionFilePath(threadID)
-	if !ok {
-		return "", false, nil
-	}
-	records, err := readCodexJSONL(path)
-	if err != nil {
-		return "", false, err
-	}
-	active := activeCodexSessionTurnIDFromRecords(records)
-	return active, active != "", nil
-}
-
-func activeCodexSessionTurnIDFromRecords(records []codexJSONLRecord) string {
-	var active string
-	for _, record := range records {
-		payload := codexTaskPayload{}
-		_ = json.Unmarshal(record.Payload, &payload)
-		switch payload.Type {
-		case "task_started":
-			active = payload.TurnID
-		case "task_complete", "task_aborted", "turn_aborted":
-			active = ""
-		default:
-			if record.Type == "turn_context" && active == "" {
-				active = payload.TurnID
-			}
-		}
-		switch record.Type {
-		case "task_complete", "task_aborted", "turn_aborted":
-			active = ""
-		}
-	}
-	return active
 }
 
 func formatCodexJSONLTimestamp(t time.Time) string {

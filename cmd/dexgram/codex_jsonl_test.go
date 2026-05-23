@@ -64,49 +64,6 @@ func TestInsertTelegramTranscriptRecordRefusesActiveTurn(t *testing.T) {
 	}
 }
 
-func TestActiveCodexSessionTurnIDFromRecordsTracksOpenDesktopTurn(t *testing.T) {
-	records := []codexJSONLRecord{
-		recordWithPayload(t, "2026-05-15T10:00:00.000Z", "event_msg", `{"type":"task_started","turn_id":"turn-1"}`),
-		recordWithPayload(t, "2026-05-15T10:00:01.000Z", "event_msg", `{"type":"task_complete"}`),
-		recordWithPayload(t, "2026-05-15T10:00:02.000Z", "event_msg", `{"type":"task_started","turn_id":"turn-2"}`),
-	}
-	if got := activeCodexSessionTurnIDFromRecords(records); got != "turn-2" {
-		t.Fatalf("active turn = %q, want turn-2", got)
-	}
-}
-
-func TestActiveCodexSessionTurnIDFromRecordsClearsTerminalDesktopTurn(t *testing.T) {
-	records := []codexJSONLRecord{
-		recordWithPayload(t, "2026-05-15T10:00:00.000Z", "event_msg", `{"type":"task_started","turn_id":"turn-1"}`),
-		recordWithPayload(t, "2026-05-15T10:00:01.000Z", "event_msg", `{"type":"turn_aborted"}`),
-	}
-	if got := activeCodexSessionTurnIDFromRecords(records); got != "" {
-		t.Fatalf("active turn = %q, want empty", got)
-	}
-}
-
-func TestActiveCodexSessionTurnIDReadsSessionFile(t *testing.T) {
-	home := setCmdTestHome(t)
-	dir := filepath.Join(home, ".codex", "sessions", "2026", "05", "15")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(dir, "rollout-thread-1.jsonl")
-	if err := writeCodexJSONL(path, []codexJSONLRecord{
-		recordWithPayload(t, "2026-05-15T10:00:00.000Z", "event_msg", `{"type":"task_started","turn_id":"turn-1"}`),
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	got, ok, err := activeCodexSessionTurnID("thread-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok || got != "turn-1" {
-		t.Fatalf("active turn = %q, %v; want turn-1, true", got, ok)
-	}
-}
-
 func TestTelegramTranscriptTextPrefixesTelegram(t *testing.T) {
 	got := telegramTranscriptText(" hello\nworld ")
 	want := "Telegram: hello\nworld\n"
