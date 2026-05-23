@@ -56,6 +56,9 @@ func run() error {
 	if len(os.Args) > 1 && os.Args[1] == "status" {
 		return serviceStatus()
 	}
+	if len(os.Args) > 1 && os.Args[1] == "clean" {
+		return runCleanCommand(os.Stdout)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "onboard" {
 		return runOnboardCommand(os.Args[2:])
 	}

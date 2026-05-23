@@ -128,6 +128,9 @@ Dexgram is intentionally Windows-specific:
 - Service mode uses a per-user Startup folder login item and is not a Windows
   Service. `dexgram service start|stop|restart` manage that login item and the
   running Dexgram process.
+- `dexgram clean` removes dangling `codex.exe app-server --listen stdio://`
+  processes while keeping the app-server directly owned by the running Dexgram
+  service. The update workflow runs the same cleanup after restarting Dexgram.
 - Default paths use `%APPDATA%` and `%LOCALAPPDATA%`.
 - The Codex CLI is auto-discovered at
   `%LOCALAPPDATA%\OpenAI\Codex\bin\codex.exe`.

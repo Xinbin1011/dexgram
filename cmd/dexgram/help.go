@@ -30,6 +30,7 @@ Usage
   %[1]s telegram chatid add <chat_id_or_pairing_code>
   %[1]s telegram token update
   %[1]s update
+  %[1]s clean
   %[1]s status
   %[1]s service <install|start|stop|restart|status|uninstall>
 
@@ -65,7 +66,14 @@ Update
   %[1]s update
       Check GitHub for a newer release. If one exists, run the installer in
       update mode, replace %%LOCALAPPDATA%%\Dexgram\dexgram.exe, and skip
-      onboarding. After a successful update, start the Dexgram service.
+      onboarding. After a successful update, start the Dexgram service and
+      clean dangling Codex app-server processes.
+
+Clean
+
+  %[1]s clean
+      Kill dangling Codex app-server processes while keeping the app-server
+      directly owned by the running Dexgram service.
 
 Version
 
