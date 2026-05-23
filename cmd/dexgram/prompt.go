@@ -57,7 +57,7 @@ func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, m
 		}
 	}
 
-	queued := a.sessionTurnCount(key) > 0
+	queued := a.shouldQueuePrompt(ctx, key, session)
 	var turnID string
 	if !queued {
 		var err error

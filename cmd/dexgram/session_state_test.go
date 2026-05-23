@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"dexgram/internal/codex"
+	"dexgram/internal/state"
 
 	"github.com/go-telegram/bot"
 )
@@ -84,6 +85,40 @@ func TestSessionStatePromotesLocalQueuedTurns(t *testing.T) {
 	app.removeSessionTurn("chat:topic", "active-turn")
 	if got := app.currentTurnID("chat:topic"); got != "codex-turn" {
 		t.Fatalf("current turn after promotion = %q", got)
+	}
+}
+
+func TestSessionStateCanDropStaleActiveTurnsWithoutDroppingQueuedTurns(t *testing.T) {
+	app := newTestApp()
+	session := &activeTurn{
+		conv: state.Conversation{
+			ChatID:          123,
+			MessageThreadID: 7,
+		},
+		ctx:   context.Background(),
+		turns: map[string]*telegramTurn{},
+	}
+	if !app.registerSession("chat:topic", session) {
+		t.Fatal("expected session register")
+	}
+
+	app.addSessionTurn("chat:topic", &telegramTurn{TurnID: "stale-active"})
+	app.addSessionTurn("chat:topic", &telegramTurn{TurnID: "queued", Queued: true})
+	app.removeActiveSessionTurns("chat:topic")
+
+	if got := app.currentTurnID("chat:topic"); got != "" {
+		t.Fatalf("current turn after stale cleanup = %q", got)
+	}
+	if got := app.sessionTurn("chat:topic", "queued"); got == nil || !got.Queued {
+		t.Fatalf("queued turn was not preserved: %#v", got)
+	}
+
+	app.replaceActiveSessionTurn("chat:topic", codex.Turn{ID: "remote-active", Status: "running"})
+	if got := app.currentTurnID("chat:topic"); got != "remote-active" {
+		t.Fatalf("current turn after replacement = %q", got)
+	}
+	if got := app.sessionTurn("chat:topic", "queued"); got == nil || !got.Queued {
+		t.Fatalf("queued turn was not preserved after replacement: %#v", got)
 	}
 }
 

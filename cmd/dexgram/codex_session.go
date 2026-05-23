@@ -148,6 +148,28 @@ func activeCodexTurns(thread codex.Thread) []codex.Turn {
 	return active
 }
 
+func (a *app) shouldQueuePrompt(ctx context.Context, key string, session *activeTurn) bool {
+	if session == nil || session.client == nil || session.threadID == "" {
+		return a.sessionTurnCount(key) > 0
+	}
+	if a.currentTurnID(key) == "" {
+		return false
+	}
+	active, err := latestActiveThreadTurn(ctx, session.client, session.threadID)
+	if err != nil {
+		log.Printf("read active Codex turn before prompt submit thread_id=%s: %v", session.threadID, err)
+		return true
+	}
+	if active.ID == "" {
+		a.removeActiveSessionTurns(key)
+		return false
+	}
+	if active.ID != a.currentTurnID(key) {
+		a.replaceActiveSessionTurn(key, active)
+	}
+	return true
+}
+
 func seedSessionAutonomousTurns(session *activeTurn, turns []codex.Turn) {
 	if session == nil || len(turns) == 0 {
 		return
@@ -546,17 +568,25 @@ func callInterruptTurn(ctx context.Context, c *codex.Client, threadID, turnID st
 }
 
 func latestActiveThreadTurnID(ctx context.Context, c *codex.Client, threadID string) (string, error) {
+	turn, err := latestActiveThreadTurn(ctx, c, threadID)
+	if err != nil {
+		return "", err
+	}
+	return turn.ID, nil
+}
+
+func latestActiveThreadTurn(ctx context.Context, c *codex.Client, threadID string) (codex.Turn, error) {
 	var read codex.ThreadReadResponse
 	if err := c.Call(ctx, "thread/read", map[string]any{"threadId": threadID}, &read); err != nil {
-		return "", err
+		return codex.Turn{}, err
 	}
 	for i := len(read.Thread.Turns) - 1; i >= 0; i-- {
 		turn := read.Thread.Turns[i]
 		if turn.ID != "" && !isTerminalTurnStatus(turn.Status) {
-			return turn.ID, nil
+			return turn, nil
 		}
 	}
-	return "", nil
+	return codex.Turn{}, nil
 }
 
 func isTerminalTurnStatus(status string) bool {

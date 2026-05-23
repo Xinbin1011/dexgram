@@ -151,6 +151,63 @@ func (a *app) removeSessionTurn(key, turnID string) {
 	}
 }
 
+func (a *app) removeActiveSessionTurns(key string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	session := a.active[key]
+	if session == nil {
+		return
+	}
+	filtered := session.order[:0]
+	for _, id := range session.order {
+		turn := session.turns[id]
+		if turn == nil {
+			continue
+		}
+		if turn.Queued {
+			filtered = append(filtered, id)
+			continue
+		}
+		delete(session.turns, id)
+	}
+	session.order = filtered
+}
+
+func (a *app) replaceActiveSessionTurn(key string, turn codex.Turn) {
+	if turn.ID == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	session := a.active[key]
+	if session == nil {
+		return
+	}
+	filtered := session.order[:0]
+	for _, id := range session.order {
+		existing := session.turns[id]
+		if existing == nil {
+			continue
+		}
+		if existing.Queued {
+			filtered = append(filtered, id)
+			continue
+		}
+		delete(session.turns, id)
+	}
+	if session.turns[turn.ID] == nil {
+		session.turns[turn.ID] = &telegramTurn{
+			TurnID:          turn.ID,
+			ChatID:          session.conv.ChatID,
+			MessageThreadID: session.conv.MessageThreadID,
+			Autonomous:      true,
+			Buffers:         map[string]string{},
+			SentFiles:       map[string]bool{},
+		}
+	}
+	session.order = append(filtered, turn.ID)
+}
+
 func (a *app) currentTurnID(key string) string {
 	a.mu.Lock()
 	defer a.mu.Unlock()

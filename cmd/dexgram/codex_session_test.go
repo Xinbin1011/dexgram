@@ -107,9 +107,10 @@ func TestActiveCodexTurnsFiltersTerminalTurns(t *testing.T) {
 		{ID: "running", Status: "running"},
 		{ID: "", Status: "running"},
 		{ID: "active", Status: "active"},
+		{ID: "paused", Status: "paused"},
 		{ID: "failed", Status: "failed"},
 	}})
-	if len(got) != 2 || got[0].ID != "running" || got[1].ID != "active" {
+	if len(got) != 3 || got[0].ID != "running" || got[1].ID != "active" || got[2].ID != "paused" {
 		t.Fatalf("active turns = %#v", got)
 	}
 }
@@ -157,7 +158,7 @@ func TestIsTerminalTurnStatus(t *testing.T) {
 			t.Fatalf("status %q should be terminal", status)
 		}
 	}
-	for _, status := range []string{"", "running", "active", "in_progress"} {
+	for _, status := range []string{"", "running", "active", "in_progress", "paused"} {
 		if isTerminalTurnStatus(status) {
 			t.Fatalf("status %q should not be terminal", status)
 		}
