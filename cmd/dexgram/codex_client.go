@@ -168,6 +168,9 @@ func (a *app) codexAppServerPIDPath() string {
 
 func (a *app) collectCodexEvents(ctx context.Context, c *codex.Client) {
 	for ev := range c.Events() {
+		if isCodexUsageUpdateEvent(ev) {
+			continue
+		}
 		key, session := a.sessionForCodexEvent(ev)
 		if session == nil {
 			if a.rememberPendingCodexEvent(ev) {

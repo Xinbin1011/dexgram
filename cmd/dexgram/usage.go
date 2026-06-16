@@ -54,24 +54,37 @@ func (a *app) readUsageSnapshot(ctx context.Context, chatID int64, messageThread
 }
 
 func readCodexUsage(ctx context.Context, c *codex.Client) (codex.RateLimitSnapshot, error) {
+	if c == nil {
+		return codex.RateLimitSnapshot{}, fmt.Errorf("Codex app-server is not available")
+	}
+	var account map[string]any
+	_ = c.Call(ctx, "account/read", map[string]any{}, &account)
+
 	var out codex.AccountRateLimitsResponse
 	if err := c.Call(ctx, "account/rateLimits/read", nil, &out); err != nil {
-		return codex.RateLimitSnapshot{}, err
+		if snapshot, ok := latestCodexUsage(c); ok {
+			return snapshot, nil
+		}
+		return codex.RateLimitSnapshot{}, usageReadError(err)
 	}
 	snapshot, ok := selectUsageSnapshot(out)
 	if !ok {
-		return codex.RateLimitSnapshot{}, fmt.Errorf("Codex did not return usage limits")
+		if snapshot, ok := latestCodexUsage(c); ok {
+			return snapshot, nil
+		}
+		return codex.RateLimitSnapshot{}, fmt.Errorf("Codex did not return usable 5-hour or weekly usage limits")
 	}
+	c.RememberAccountRateLimits(out)
 	return snapshot, nil
 }
 
 func selectUsageSnapshot(resp codex.AccountRateLimitsResponse) (codex.RateLimitSnapshot, bool) {
 	if resp.RateLimitsByLimitID != nil {
-		if snapshot := resp.RateLimitsByLimitID["codex"]; snapshot != nil && !emptyUsageSnapshot(*snapshot) {
+		if snapshot := resp.RateLimitsByLimitID["codex"]; usableUsageSnapshot(snapshot) {
 			return *snapshot, true
 		}
 		for _, snapshot := range resp.RateLimitsByLimitID {
-			if snapshot == nil || emptyUsageSnapshot(*snapshot) {
+			if !usableUsageSnapshot(snapshot) {
 				continue
 			}
 			if strings.Contains(strings.ToLower(snapshot.LimitID), "codex") ||
@@ -80,14 +93,46 @@ func selectUsageSnapshot(resp codex.AccountRateLimitsResponse) (codex.RateLimitS
 			}
 		}
 	}
-	if !emptyUsageSnapshot(resp.RateLimits) {
+	if usableUsageSnapshot(&resp.RateLimits) {
 		return resp.RateLimits, true
 	}
 	return codex.RateLimitSnapshot{}, false
 }
 
-func emptyUsageSnapshot(snapshot codex.RateLimitSnapshot) bool {
-	return snapshot.Primary == nil && snapshot.Secondary == nil && snapshot.LimitID == "" && snapshot.LimitName == ""
+func latestCodexUsage(c *codex.Client) (codex.RateLimitSnapshot, bool) {
+	latest, ok := c.LatestAccountRateLimits()
+	if !ok {
+		return codex.RateLimitSnapshot{}, false
+	}
+	return selectUsageSnapshot(latest)
+}
+
+func usageReadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "chatgpt authentication required") {
+		return fmt.Errorf("Codex needs ChatGPT authentication to read usage limits; sign in to Codex with ChatGPT, then try /usage again")
+	}
+	return err
+}
+
+func isCodexUsageUpdateEvent(ev codex.Event) bool {
+	return ev.Method == "account/rateLimits/updated"
+}
+
+func usableUsageSnapshot(snapshot *codex.RateLimitSnapshot) bool {
+	if snapshot == nil {
+		return false
+	}
+	return usableUsageWindow(snapshot.Primary) || usableUsageWindow(snapshot.Secondary)
+}
+
+func usableUsageWindow(window *codex.RateLimitWindow) bool {
+	if window == nil {
+		return false
+	}
+	return window.WindowDurationMins != nil || window.ResetsAt != nil || window.UsedPercent != 0
 }
 
 func formatUsageSnapshot(snapshot codex.RateLimitSnapshot, now time.Time) string {

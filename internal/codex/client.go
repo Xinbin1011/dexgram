@@ -33,15 +33,17 @@ type Client struct {
 	stderr io.ReadCloser
 	guard  appServerProcessGuard
 
-	nextID         atomic.Int64
-	pending        map[int64]chan rpcMessage
-	events         chan rpcMessage
-	errs           chan error
-	requestHandler ServerRequestHandler
-	mu             sync.Mutex
-	lastErr        error
-	closed         chan struct{}
-	readers        sync.WaitGroup
+	nextID          atomic.Int64
+	pending         map[int64]chan rpcMessage
+	events          chan rpcMessage
+	errs            chan error
+	requestHandler  ServerRequestHandler
+	mu              sync.Mutex
+	lastErr         error
+	latestLimits    AccountRateLimitsResponse
+	hasLatestLimits bool
+	closed          chan struct{}
+	readers         sync.WaitGroup
 }
 
 type rpcMessage struct {
@@ -345,6 +347,28 @@ func (c *Client) SetServerRequestHandler(handler ServerRequestHandler) {
 	c.mu.Unlock()
 }
 
+func (c *Client) RememberAccountRateLimits(resp AccountRateLimitsResponse) {
+	if c == nil || !hasAccountRateLimits(resp) {
+		return
+	}
+	c.mu.Lock()
+	c.latestLimits = cloneAccountRateLimitsResponse(resp)
+	c.hasLatestLimits = true
+	c.mu.Unlock()
+}
+
+func (c *Client) LatestAccountRateLimits() (AccountRateLimitsResponse, bool) {
+	if c == nil {
+		return AccountRateLimitsResponse{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.hasLatestLimits {
+		return AccountRateLimitsResponse{}, false
+	}
+	return cloneAccountRateLimitsResponse(c.latestLimits), true
+}
+
 func (c *Client) Call(ctx context.Context, method string, params any, out any) error {
 	id := c.nextID.Add(1)
 	ch := make(chan rpcMessage, 1)
@@ -501,6 +525,7 @@ func shouldBufferAppServerParseFailure(line string, err error) bool {
 }
 
 func (c *Client) handleStdoutMessage(msg rpcMessage) {
+	c.rememberAccountRateLimitsUpdate(msg)
 	if msg.ID != nil {
 		if msg.Method != "" {
 			c.handleServerRequest(*msg.ID, msg.Method, msg.Params)
@@ -518,6 +543,70 @@ func (c *Client) handleStdoutMessage(msg rpcMessage) {
 	if msg.Method != "" {
 		c.events <- msg
 	}
+}
+
+func (c *Client) rememberAccountRateLimitsUpdate(msg rpcMessage) {
+	if msg.Method != "account/rateLimits/updated" || len(msg.Params) == 0 {
+		return
+	}
+	var resp AccountRateLimitsResponse
+	if err := json.Unmarshal(msg.Params, &resp); err == nil {
+		c.RememberAccountRateLimits(resp)
+	}
+}
+
+func hasAccountRateLimits(resp AccountRateLimitsResponse) bool {
+	for _, snapshot := range resp.RateLimitsByLimitID {
+		if snapshot != nil && (snapshot.Primary != nil || snapshot.Secondary != nil) {
+			return true
+		}
+	}
+	return resp.RateLimits.Primary != nil ||
+		resp.RateLimits.Secondary != nil
+}
+
+func cloneAccountRateLimitsResponse(resp AccountRateLimitsResponse) AccountRateLimitsResponse {
+	out := AccountRateLimitsResponse{
+		RateLimits: cloneRateLimitSnapshot(resp.RateLimits),
+	}
+	if resp.RateLimitsByLimitID != nil {
+		out.RateLimitsByLimitID = make(map[string]*RateLimitSnapshot, len(resp.RateLimitsByLimitID))
+		for key, snapshot := range resp.RateLimitsByLimitID {
+			if snapshot == nil {
+				continue
+			}
+			cloned := cloneRateLimitSnapshot(*snapshot)
+			out.RateLimitsByLimitID[key] = &cloned
+		}
+	}
+	return out
+}
+
+func cloneRateLimitSnapshot(snapshot RateLimitSnapshot) RateLimitSnapshot {
+	out := snapshot
+	if snapshot.Primary != nil {
+		out.Primary = cloneRateLimitWindow(snapshot.Primary)
+	}
+	if snapshot.Secondary != nil {
+		out.Secondary = cloneRateLimitWindow(snapshot.Secondary)
+	}
+	return out
+}
+
+func cloneRateLimitWindow(window *RateLimitWindow) *RateLimitWindow {
+	if window == nil {
+		return nil
+	}
+	out := *window
+	if window.WindowDurationMins != nil {
+		value := *window.WindowDurationMins
+		out.WindowDurationMins = &value
+	}
+	if window.ResetsAt != nil {
+		value := *window.ResetsAt
+		out.ResetsAt = &value
+	}
+	return &out
 }
 
 func isExpectedAppServerPipeClose(err error) bool {

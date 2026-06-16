@@ -36,6 +36,37 @@ func TestSelectUsageSnapshotPrefersCodexLimitBucket(t *testing.T) {
 	}
 }
 
+func TestSelectUsageSnapshotSkipsMetadataOnlyCodexBucket(t *testing.T) {
+	fiveHours := 300.0
+	weekly := 10080.0
+	resp := codex.AccountRateLimitsResponse{
+		RateLimits: codex.RateLimitSnapshot{
+			LimitID:   "codex",
+			LimitName: "Codex",
+			Primary:   &codex.RateLimitWindow{UsedPercent: 26, WindowDurationMins: &fiveHours},
+			Secondary: &codex.RateLimitWindow{UsedPercent: 81, WindowDurationMins: &weekly},
+		},
+		RateLimitsByLimitID: map[string]*codex.RateLimitSnapshot{
+			"codex": {LimitID: "codex", LimitName: "Codex"},
+		},
+	}
+
+	got, ok := selectUsageSnapshot(resp)
+	if !ok {
+		t.Fatal("expected fallback usage snapshot")
+	}
+	if got.Primary == nil || got.Secondary == nil {
+		t.Fatalf("selected metadata-only snapshot: %#v", got)
+	}
+}
+
+func TestUsageReadErrorExplainsChatGPTAuthRequirement(t *testing.T) {
+	err := usageReadError(mockError("app-server returned error for account/rateLimits/read (code -32600): chatgpt authentication required to read rate limits"))
+	if err == nil || !strings.Contains(err.Error(), "ChatGPT authentication") {
+		t.Fatalf("usageReadError returned %v", err)
+	}
+}
+
 func TestFormatUsageSnapshotShowsFiveHourAndWeeklyWindows(t *testing.T) {
 	fiveHours := 300.0
 	weekly := 10080.0

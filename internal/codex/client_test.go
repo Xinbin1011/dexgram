@@ -349,6 +349,36 @@ func TestNormalizeAppServerStderr(t *testing.T) {
 	}
 }
 
+func TestClientCachesRateLimitUpdateNotifications(t *testing.T) {
+	client, _, stdout := newPipeClient(t)
+	defer func() {
+		_ = stdout.Close()
+	}()
+
+	_, err := fmt.Fprintln(stdout, `{"method":"account/rateLimits/updated","params":{"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":26,"windowDurationMins":300},"secondary":{"usedPercent":81,"windowDurationMins":10080}}}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var latest AccountRateLimitsResponse
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		var ok bool
+		latest, ok = client.LatestAccountRateLimits()
+		if ok {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	snapshot := latest.RateLimitsByLimitID["codex"]
+	if snapshot == nil || snapshot.Primary == nil || snapshot.Secondary == nil {
+		t.Fatalf("latest rate limits were not cached: %#v", latest)
+	}
+	if snapshot.Primary.WindowDurationMins == nil || *snapshot.Primary.WindowDurationMins != 300 {
+		t.Fatalf("primary window was not preserved: %#v", snapshot.Primary)
+	}
+}
+
 func newPipeClient(t *testing.T) (*Client, *io.PipeReader, *io.PipeWriter) {
 	t.Helper()
 	stdinReader, stdinWriter := io.Pipe()
