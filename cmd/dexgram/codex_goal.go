@@ -9,39 +9,22 @@ import (
 )
 
 func (a *app) setTopicGoal(ctx context.Context, chatID int64, messageThreadID int, objective string) error {
-	key := fmt.Sprintf("%d:%d", chatID, messageThreadID)
-	if session := a.activeSession(key); session != nil {
-		return setThreadGoal(ctx, session.client, session.threadID, objective)
-	}
-
-	conv := a.topicConversation(chatID, messageThreadID)
-	conv, err := prepareProjectlessWorkspace(conv, objective)
+	session, err := a.ensureTopicLiveSession(ctx, chatID, messageThreadID, objective)
 	if err != nil {
 		return err
 	}
-	c, err := a.startCodexAppServer(ctx, codex.StartOptions{
-		CLIPath:    a.cfg.Codex.CLIPath,
-		WorkingDir: appServerWorkingDir(conv),
-	}, "set goal")
-	if err != nil {
-		return err
-	}
-	conv, err = a.prepareTopicConversation(ctx, c, conv)
-	if err != nil {
-		return err
-	}
-	return setThreadGoal(ctx, c, conv.CodexThreadID, objective)
+	return setThreadGoal(ctx, session.client, session.threadID, objective)
 }
 
 func (a *app) clearTopicGoal(ctx context.Context, chatID int64, messageThreadID int) error {
-	return a.withExistingTopicCodexClient(ctx, chatID, messageThreadID, func(c *codex.Client, threadID string) error {
+	return a.withExistingTopicCodexClient(ctx, chatID, messageThreadID, false, func(c *codex.Client, threadID string) error {
 		return clearThreadGoal(ctx, c, threadID)
 	})
 }
 
 func (a *app) getTopicGoal(ctx context.Context, chatID int64, messageThreadID int) (*codex.ThreadGoal, error) {
 	var goal *codex.ThreadGoal
-	err := a.withExistingTopicCodexClient(ctx, chatID, messageThreadID, func(c *codex.Client, threadID string) error {
+	err := a.withExistingTopicCodexClient(ctx, chatID, messageThreadID, false, func(c *codex.Client, threadID string) error {
 		var err error
 		goal, err = getThreadGoal(ctx, c, threadID)
 		return err
@@ -51,7 +34,7 @@ func (a *app) getTopicGoal(ctx context.Context, chatID int64, messageThreadID in
 
 func (a *app) pauseTopicGoal(ctx context.Context, chatID int64, messageThreadID int) (string, error) {
 	var objective string
-	err := a.withExistingTopicCodexClient(ctx, chatID, messageThreadID, func(c *codex.Client, threadID string) error {
+	err := a.withExistingTopicCodexClient(ctx, chatID, messageThreadID, false, func(c *codex.Client, threadID string) error {
 		goal, err := getThreadGoal(ctx, c, threadID)
 		if err != nil {
 			return err
@@ -67,18 +50,19 @@ func (a *app) pauseTopicGoal(ctx context.Context, chatID int64, messageThreadID 
 
 func (a *app) resumeTopicGoal(ctx context.Context, chatID int64, messageThreadID int) (string, error) {
 	var objective string
-	err := a.withExistingTopicCodexClient(ctx, chatID, messageThreadID, func(c *codex.Client, threadID string) error {
-		goal, err := getThreadGoal(ctx, c, threadID)
-		if err != nil {
-			return err
-		}
-		objective = goalObjective(goal)
-		if objective == "" {
-			return fmt.Errorf("no paused Codex goal is set for this thread")
-		}
-		return setThreadGoalStatus(ctx, c, threadID, "active")
-	})
-	return objective, err
+	session, err := a.ensureExistingTopicLiveSession(ctx, chatID, messageThreadID)
+	if err != nil {
+		return "", err
+	}
+	goal, err := getThreadGoal(ctx, session.client, session.threadID)
+	if err != nil {
+		return "", err
+	}
+	objective = goalObjective(goal)
+	if objective == "" {
+		return "", fmt.Errorf("no paused Codex goal is set for this thread")
+	}
+	return objective, setThreadGoalStatus(ctx, session.client, session.threadID, "active")
 }
 
 func goalObjective(goal *codex.ThreadGoal) string {
@@ -88,7 +72,31 @@ func goalObjective(goal *codex.ThreadGoal) string {
 	return strings.TrimSpace(goal.Objective)
 }
 
-func (a *app) withExistingTopicCodexClient(ctx context.Context, chatID int64, messageThreadID int, fn func(*codex.Client, string) error) error {
+func (a *app) ensureTopicLiveSession(ctx context.Context, chatID int64, messageThreadID int, titleHint string) (*activeTurn, error) {
+	key := fmt.Sprintf("%d:%d", chatID, messageThreadID)
+	if session := a.activeSession(key); session != nil {
+		return session, nil
+	}
+	return a.startTopicSession(ctx, key, chatID, messageThreadID, titleHint)
+}
+
+func (a *app) ensureExistingTopicLiveSession(ctx context.Context, chatID int64, messageThreadID int) (*activeTurn, error) {
+	key := fmt.Sprintf("%d:%d", chatID, messageThreadID)
+	if session := a.activeSession(key); session != nil {
+		return session, nil
+	}
+
+	conv, ok, err := a.store.Get(chatID, messageThreadID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || conv.CodexThreadID == "" {
+		return nil, fmt.Errorf("this Telegram topic has not started a Codex thread yet")
+	}
+	return a.startTopicSession(ctx, key, chatID, messageThreadID, "")
+}
+
+func (a *app) withExistingTopicCodexClient(ctx context.Context, chatID int64, messageThreadID int, resume bool, fn func(*codex.Client, string) error) error {
 	key := fmt.Sprintf("%d:%d", chatID, messageThreadID)
 	if session := a.activeSession(key); session != nil {
 		return fn(session.client, session.threadID)
@@ -109,10 +117,15 @@ func (a *app) withExistingTopicCodexClient(ctx context.Context, chatID int64, me
 	if err != nil {
 		return err
 	}
-	if err := a.resumeCodexThread(ctx, c, conv.CodexThreadID); err != nil {
+	if resume {
+		if err := a.resumeCodexThread(ctx, c, conv.CodexThreadID); err != nil {
+			return err
+		}
+	}
+	if err := fn(c, conv.CodexThreadID); err != nil {
 		return err
 	}
-	return fn(c, conv.CodexThreadID)
+	return nil
 }
 
 func setThreadGoal(ctx context.Context, c *codex.Client, threadID, objective string) error {

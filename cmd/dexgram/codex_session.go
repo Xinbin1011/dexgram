@@ -40,14 +40,15 @@ func (a *app) startTopicSession(ctx context.Context, key string, chatID int64, m
 		return nil, err
 	}
 
-	conv, err = a.prepareTopicConversation(ctx, c, conv)
+	var resumedThread codex.Thread
+	conv, resumedThread, err = a.prepareTopicConversation(ctx, c, conv)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
 	var activeTurns []codex.Turn
 	if seedExistingTurns {
-		activeTurns = a.activeCodexTurnsBestEffort(ctx, c, conv.CodexThreadID)
+		activeTurns = a.activeCodexTurnsForResumedSession(conv.CodexThreadID, resumedThread)
 	}
 
 	session := &activeTurn{
@@ -92,11 +93,11 @@ func (a *app) topicConversation(chatID int64, messageThreadID int) state.Convers
 	return conv
 }
 
-func (a *app) prepareTopicConversation(ctx context.Context, c *codex.Client, conv state.Conversation) (state.Conversation, error) {
+func (a *app) prepareTopicConversation(ctx context.Context, c *codex.Client, conv state.Conversation) (state.Conversation, codex.Thread, error) {
 	if conv.CodexThreadID == "" {
 		threadID, cwd, err := a.startCodexThread(ctx, c, conv)
 		if err != nil {
-			return state.Conversation{}, err
+			return state.Conversation{}, codex.Thread{}, err
 		}
 		conv.CodexThreadID = threadID
 		conv.CWD = cwd
@@ -106,27 +107,19 @@ func (a *app) prepareTopicConversation(ctx context.Context, c *codex.Client, con
 			}
 		}
 		if err := a.store.Upsert(conv); err != nil {
-			return state.Conversation{}, err
+			return state.Conversation{}, codex.Thread{}, err
 		}
 		log.Printf("mapped telegram thread %d:%d to codex thread %s", conv.ChatID, conv.MessageThreadID, threadID)
-		return conv, nil
+		return conv, codex.Thread{}, nil
 	}
 	if conv.SideChat {
-		return conv, nil
+		return conv, codex.Thread{}, nil
 	}
-	if err := a.resumeCodexThread(ctx, c, conv.CodexThreadID); err != nil {
-		return state.Conversation{}, err
+	resume, err := a.resumeCodexThreadResult(ctx, c, conv.CodexThreadID)
+	if err != nil {
+		return state.Conversation{}, codex.Thread{}, err
 	}
-	return conv, nil
-}
-
-func (a *app) activeCodexTurnsBestEffort(ctx context.Context, c *codex.Client, threadID string) []codex.Turn {
-	var read codex.ThreadReadResponse
-	if err := c.Call(ctx, "thread/read", map[string]any{"threadId": threadID}, &read); err != nil {
-		log.Printf("read active Codex turns after resume thread_id=%s: %v", threadID, err)
-		return nil
-	}
-	return a.activeCodexTurnsForResumedSession(threadID, read.Thread)
+	return conv, resume.Thread, nil
 }
 
 func activeCodexTurns(thread codex.Thread) []codex.Turn {
