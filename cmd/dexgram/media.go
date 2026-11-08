@@ -122,6 +122,8 @@ func attachmentLine(kind, path string) string {
 	return "Attached file: " + path
 }
 
+const maxTelegramDownload = 20 * 1024 * 1024
+
 func (a *app) downloadTelegramFile(ctx context.Context, b *bot.Bot, fileID, name string, msg *models.Message) (string, error) {
 	file, err := b.GetFile(ctx, &bot.GetFileParams{FileID: fileID})
 	if err != nil {
@@ -138,14 +140,18 @@ func (a *app) downloadTelegramFile(ctx context.Context, b *bot.Bot, fileID, name
 	if ext := filepath.Ext(file.FilePath); filepath.Ext(name) == "" && ext != "" {
 		name += ext
 	}
-	path := filepath.Join(dir, safeFilename(name))
+	name = safeFilename(name)
+	if !filepath.IsLocal(name) {
+		name = "attachment"
+	}
+	path := filepath.Join(dir, name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.FileDownloadLink(file), nil)
 	if err != nil {
 		return "", err
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("Telegram attachment download failed")
 	}
 	defer func() {
 		_ = resp.Body.Close()
@@ -153,14 +159,26 @@ func (a *app) downloadTelegramFile(ctx context.Context, b *bot.Bot, fileID, name
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("telegram file download returned HTTP %d", resp.StatusCode)
 	}
-	out, err := os.Create(path)
+	if resp.ContentLength > maxTelegramDownload {
+		return "", fmt.Errorf("Telegram attachment exceeds 20 MB")
+	}
+	out, err := os.CreateTemp(dir, "download-*")
 	if err != nil {
 		return "", err
 	}
-	defer func() {
-		_ = out.Close()
-	}()
-	if _, err := io.Copy(out, resp.Body); err != nil {
+	defer func() { _ = os.Remove(out.Name()) }()
+	n, copyErr := io.Copy(out, io.LimitReader(resp.Body, maxTelegramDownload+1))
+	closeErr := out.Close()
+	if copyErr != nil {
+		return "", fmt.Errorf("Telegram attachment download failed")
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	if n > maxTelegramDownload {
+		return "", fmt.Errorf("Telegram attachment exceeds 20 MB")
+	}
+	if err := os.Rename(out.Name(), path); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -177,39 +195,19 @@ func (a *app) sendFinalAnswerFiles(ctx context.Context, turn *telegramTurn, cwd,
 			continue
 		}
 		turn.SentFiles[path] = true
-		if err := a.sendOutputFile(ctx, turn, path); err != nil {
+		if err := a.sendOutputFile(ctx, turn, cwd, path); err != nil {
 			log.Printf("send final answer file %s: %v", path, err)
 		}
 	}
 }
 
-func (a *app) sendOutputFile(ctx context.Context, turn *telegramTurn, path string) error {
-	f, err := os.Open(path)
+func (a *app) sendOutputFile(ctx context.Context, turn *telegramTurn, cwd, path string) error {
+	f, err := openWorkspaceFile(cwd, path)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = f.Close()
-	}()
-	file := &models.InputFileUpload{Filename: filepath.Base(path), Data: f}
-	if isImagePath(path) {
-		_, err = a.bot.SendPhoto(ctx, &bot.SendPhotoParams{
-			ChatID:              turn.ChatID,
-			MessageThreadID:     turn.MessageThreadID,
-			Photo:               file,
-			Caption:             filepath.Base(path),
-			DisableNotification: true,
-		})
-		return err
-	}
-	_, err = a.bot.SendDocument(ctx, &bot.SendDocumentParams{
-		ChatID:              turn.ChatID,
-		MessageThreadID:     turn.MessageThreadID,
-		Document:            file,
-		Caption:             filepath.Base(path),
-		DisableNotification: true,
-	})
-	return err
+	defer func() { _ = f.Close() }()
+	return sendTelegramFile(ctx, a.bot, turn.ChatID, turn.MessageThreadID, f, true)
 }
 
 func finalAnswerFilePaths(cwd, answer string) []string {

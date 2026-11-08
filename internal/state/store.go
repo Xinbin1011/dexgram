@@ -369,6 +369,32 @@ WHERE chat_id = ? AND message_thread_id = ?`, chatID, messageThreadID)
 	return err
 }
 
+func (s *Store) WorkspacePins(chatID int64) (map[string]bool, error) {
+	prefix := fmt.Sprintf("workspace-pin:%d:", chatID)
+	rows, err := s.db.Query("SELECT key, value FROM settings WHERE key LIKE ?", prefix+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	pins := map[string]bool{}
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, err
+		}
+		pins[key[len(prefix):]] = value == "1"
+	}
+	return pins, rows.Err()
+}
+
+func (s *Store) SetWorkspacePin(chatID int64, key string, pinned bool) error {
+	value := "0"
+	if pinned {
+		value = "1"
+	}
+	return s.SetSetting(fmt.Sprintf("workspace-pin:%d:%s", chatID, key), value)
+}
+
 func (s *Store) GetSetting(key string) (string, error) {
 	row := s.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key)
 	var value string

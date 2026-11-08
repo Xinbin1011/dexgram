@@ -18,14 +18,14 @@ func TestSettingsTextAndReasoningMenuReflectStoredSettings(t *testing.T) {
 	defer closeTestStateStore(t, store)
 
 	app := &app{store: store}
-	if err := store.SetSetting(codexModelSettingKey, "gpt-5.4"); err != nil {
+	if err := store.SetSetting(topicSettingKey(42, 7, codexModelSettingKey), "gpt-5.4"); err != nil {
 		t.Fatalf("set model: %v", err)
 	}
-	if err := store.SetSetting(codexReasoningSettingKey, "high"); err != nil {
+	if err := store.SetSetting(topicSettingKey(42, 7, codexReasoningSettingKey), "high"); err != nil {
 		t.Fatalf("set effort: %v", err)
 	}
 
-	text := app.settingsText()
+	text := app.settingsText(42, 7)
 	if !strings.Contains(text, "Model: gpt-5.4") {
 		t.Fatalf("settings text missing model: %q", text)
 	}
@@ -33,7 +33,7 @@ func TestSettingsTextAndReasoningMenuReflectStoredSettings(t *testing.T) {
 		t.Fatalf("settings text missing effort: %q", text)
 	}
 
-	title, markup := app.reasoningMenu()
+	title, markup := app.reasoningMenu(42, 7)
 	if title != "Codex reasoning effort\nCurrent: high" {
 		t.Fatalf("reasoning title = %q", title)
 	}
@@ -117,7 +117,7 @@ func TestTurnOptionsUsesStoredPlanSettings(t *testing.T) {
 		store: store,
 	}
 
-	opts, err := app.turnOptions(context.Background(), nil, "plan-mode")
+	opts, err := app.turnOptions(context.Background(), nil, "plan-mode", 42, 7)
 	if err != nil {
 		t.Fatalf("turn options: %v", err)
 	}

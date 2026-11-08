@@ -1,8 +1,8 @@
 # Dexgram
 
-[![CI](https://img.shields.io/github/actions/workflow/status/yashau/dexgram/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/yashau/dexgram/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/yashau/dexgram?style=for-the-badge)](https://github.com/yashau/dexgram/releases)
-[![License](https://img.shields.io/github/license/yashau/dexgram?style=for-the-badge)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/Xinbin1011/dexgram/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/Xinbin1011/dexgram/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Xinbin1011/dexgram?style=for-the-badge)](https://github.com/Xinbin1011/dexgram/releases)
+[![License](https://img.shields.io/github/license/Xinbin1011/dexgram?style=for-the-badge)](LICENSE)
 ![Windows Only](https://img.shields.io/badge/Windows-Only-0078D4?style=for-the-badge&logo=windows11&logoColor=white)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev/)
 
@@ -92,7 +92,7 @@ Bot Settings -> Threads Settings -> Threaded Mode
 Run the installer from PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/yashau/dexgram/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Xinbin1011/dexgram/main/install.ps1 | iex
 ```
 
 It downloads the latest release, installs `dexgram.exe` under
@@ -233,11 +233,12 @@ The service log keeps the newest 5000 lines.
 
 Commands are registered only for authorized chats.
 
-- `/sessions [query]` opens the session browser. Dexgram lists projects first,
-  then paginated Codex threads inside the selected project. Attach one to the
-  current Telegram topic and Dexgram syncs the most recent 25 rendered history
-  messages by default. New completed Desktop replies after attach are mirrored
-  into the topic with the Desktop prompt quoted before the reply.
+- `/sessions [query]` opens Sections → Projects → Chats. Use Pin/Unpin to
+  keep favourite sections, projects, and chats at the top. Use **New chat in
+  this project** to create another Telegram topic bound to that project.
+- `/history` lets you read saved turns in the attached chat. Page back with
+  **Older** and tap any completed turn to read it.
+- `/sendfile <path>` sends a workspace file to the current private topic.
 - `/new [title]` creates a new topic for a one-off Codex chat.
 - `/new project query: title` creates a new topic already bound to a matched
   Codex project.
@@ -262,9 +263,9 @@ Commands are registered only for authorized chats.
   goal state. `/goal clear` removes it; `delete`, `remove`, `stop`, `off`, and
   `none` are aliases.
 - `/plan <message>` starts a Codex Plan Mode turn.
-- `/settings` shows Telegram-started Plan Mode settings.
-- `/model [model-id|auto]` chooses the Plan Mode model.
-- `/effort [auto|minimal|low|medium|high|xhigh]` chooses reasoning effort.
+- `/settings` shows the current topic’s model and reasoning settings.
+- `/model [model-id|auto]` and `/effort [auto|minimal|low|medium|high|xhigh]`
+  apply to both regular messages and Plan Mode in this topic.
 - `/stop` or `/cancel` interrupts the active Codex turn.
 
 ## How Chats Run
@@ -286,16 +287,16 @@ the stored Codex thread.
 
 ### Existing Sessions
 
-`/sessions [query]` is the fast lane back into work you already started. Dexgram
-asks Codex for recent threads, groups them by project/cwd, and shows an inline
-project tree. Pick a project, pick a thread, and the current Telegram topic is
-attached to that Codex session.
+`/sessions [query]` uses the projects and custom sections registered in
+Codex Desktop. Chats without a project have their own list. Pins are saved for
+your Telegram chat and can override Codex Desktop’s pinned chats. A chat can
+appear in its project and in its desktop section.
 
-Attach sync is intentionally bounded. Dexgram mirrors up to the most recent 25
-rendered Telegram history messages so you get context without flooding the
-topic. After attach, Dexgram records the last Telegram activity time for the
-topic, watches Codex's session JSONL file only for recently active mapped
-topics, and mirrors new completed Desktop turns after the saved sync marker.
+Attaching a chat copies a recent page for context. Use `/history` to page back
+through all available completed turns without a total turn limit. The history
+reader does not take a Codex writer lock. Continuing a chat still requires the
+desktop turn to finish if another Codex process is writing to it. Dexgram watches
+recently active topics and mirrors new completed Desktop turns.
 Old inactive mappings remain available for `/sessions`, `/status`, and manual
 `/sync`, but they do not keep live mirror workers running. Mirrored Desktop
 replies include the Desktop prompt as a Markdown quote before the answer.
@@ -373,7 +374,11 @@ inputs; other documents are included by absolute path.
 Text plus files is sent as one prompt. Files without text are staged and
 attached to the next message in that chat.
 
-By default, final answers stay text-only. To upload local files explicitly
+Use `/sendfile report.pdf` in the private topic to download a file from its
+workspace. Paths can be absolute or relative to that workspace. Telegram’s
+hosted Bot API allows documents up to 20 MB in and 50 MB out.
+
+By default, final answers stay text-only. To upload workspace files explicitly
 linked by the final answer:
 
 ```toml
@@ -387,9 +392,6 @@ Images are sent as photos. Everything else is sent as a document.
 
 - Dexgram can attach existing Codex sessions exposed by Codex app-server, but it
   does not bulk-import your entire Codex history into Telegram.
-- Attach sync is capped at the most recent 25 rendered Telegram messages. New
-  completed Desktop replies after attach are mirrored into the attached topic,
-  with the Desktop prompt quoted above the reply.
 - Telegram prompts are appended into Codex's session JSONL as `Telegram: ...`
   transcript entries, but Codex Desktop shows them only after the desktop thread
   is reloaded or Codex is restarted.

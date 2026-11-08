@@ -107,6 +107,14 @@ func (a *app) handleUpdate(ctx context.Context, b *bot.Bot, update *models.Updat
 		})
 		return
 	}
+	if isCommand && commandName == "sendfile" {
+		goFatal(func() { a.handleSendFileCommand(ctx, b, msg, commandArg) })
+		return
+	}
+	if isCommand && commandName == "history" {
+		goFatal(func() { a.handleHistoryCommand(ctx, b, msg) })
+		return
+	}
 	if isCommand && commandName == "sync" {
 		goFatal(func() {
 			a.handleSyncCommand(ctx, b, msg, commandArg)
@@ -536,6 +544,10 @@ func (a *app) handleCallback(ctx context.Context, b *bot.Bot, query *models.Call
 		a.handleFreshTopicCallback(ctx, b, query)
 		return
 	}
+	if strings.HasPrefix(query.Data, "hist:") {
+		goFatal(func() { a.handleHistoryCallback(ctx, b, query) })
+		return
+	}
 	if strings.HasPrefix(query.Data, "sess:") {
 		a.handleSessionBrowserCallback(ctx, b, query)
 		return
@@ -834,8 +846,15 @@ func (a *app) handleNewCommand(ctx context.Context, b *bot.Bot, msg *models.Mess
 		} else if len(matches) > 1 {
 			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: msg.Chat.ID, MessageThreadID: msg.MessageThreadID, Text: "That project name is ambiguous. Use /project inside the new topic before sending the first message."})
 			return
+		} else {
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: msg.Chat.ID, MessageThreadID: msg.MessageThreadID, Text: "No registered Codex project matched that name."})
+			return
 		}
 	}
+	a.createChatTopic(ctx, b, msg, projectName, cwd, title, projectless)
+}
+
+func (a *app) createChatTopic(ctx context.Context, b *bot.Bot, msg *models.Message, projectName, cwd, title string, projectless bool) {
 	if title == "" {
 		title = "New chat"
 	}

@@ -18,7 +18,6 @@ import (
 const (
 	defaultSyncTurnLimit = 1
 	maxSyncTurnLimit     = 5
-	attachSyncMessages   = 25
 	maxSyncTextRunes     = 6000
 )
 
@@ -158,28 +157,17 @@ func renderHistoricalTurnNotify(ctx context.Context, b *bot.Bot, chatID int64, m
 }
 
 func (a *app) syncRecentAttachedHistory(ctx context.Context, b *bot.Bot, conv *state.Conversation) error {
-	c, err := a.startCodexAppServer(ctx, codex.StartOptions{
-		CLIPath:    a.cfg.Codex.CLIPath,
-		WorkingDir: appServerWorkingDir(*conv),
-	}, "attach sync")
+	turns, _, err := a.readHistoryPage(ctx, *conv, "")
 	if err != nil {
 		return err
 	}
-	resume, err := a.resumeCodexThreadResult(ctx, c, conv.CodexThreadID)
-	if err != nil {
-		return err
+	for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
+		turns[i], turns[j] = turns[j], turns[i]
 	}
-	thread := resume.Thread
-	if len(thread.Turns) == 0 {
-		var read codex.ThreadReadResponse
-		if err := c.Call(ctx, "thread/read", map[string]any{"threadId": conv.CodexThreadID}, &read); err != nil {
-			return err
-		}
-		thread = read.Thread
-	}
-	turns := recentCompletedTurnsByMessageBudget(thread.Turns, attachSyncMessages)
-	log.Printf("attach sync thread_id=%s turns=%d selected=%d", conv.CodexThreadID, len(thread.Turns), len(turns))
 	for _, turn := range turns {
+		if turn.Status != "completed" {
+			continue
+		}
 		if a.shouldSkipTelegramOriginTurn(conv.CodexThreadID, turn) {
 			conv.LastSyncedTurnID = turn.ID
 			continue
@@ -207,40 +195,6 @@ func (a *app) shouldSkipTelegramOriginTurn(codexThreadID string, turn codex.Turn
 		return false
 	}
 	return synced
-}
-
-func recentCompletedTurnsByMessageBudget(turns []codex.Turn, maxMessages int) []codex.Turn {
-	if maxMessages <= 0 {
-		return nil
-	}
-	var selected []codex.Turn
-	count := 0
-	for i := len(turns) - 1; i >= 0; i-- {
-		turn := turns[i]
-		if turn.Status != "completed" {
-			continue
-		}
-		turnMessages := historicalTurnMessageCount(turn)
-		if turnMessages == 0 {
-			turnMessages = 1
-		}
-		if len(selected) > 0 && count+turnMessages > maxMessages {
-			break
-		}
-		selected = append(selected, turn)
-		count += turnMessages
-		if count >= maxMessages {
-			break
-		}
-	}
-	for i, j := 0, len(selected)-1; i < j; i, j = i+1, j-1 {
-		selected[i], selected[j] = selected[j], selected[i]
-	}
-	return selected
-}
-
-func historicalTurnMessageCount(turn codex.Turn) int {
-	return 1
 }
 
 func truncateSyncText(text string) string {

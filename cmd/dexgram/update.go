@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-const latestReleaseURL = "https://api.github.com/repos/yashau/dexgram/releases/latest"
+const latestReleaseURL = "https://api.github.com/repos/Xinbin1011/dexgram/releases/latest"
 
 type githubRelease struct {
 	TagName string        `json:"tag_name"`

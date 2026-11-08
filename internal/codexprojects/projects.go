@@ -9,17 +9,14 @@ import (
 )
 
 type Project struct {
-	Name string
-	Path string
+	ID    string
+	Name  string
+	Path  string
+	Roots []string
 }
 
-func Load() ([]Project, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	statePath := filepath.Join(home, ".codex", ".codex-global-state.json")
-	b, err := os.ReadFile(statePath)
+func loadLegacy(home string) ([]Project, error) {
+	b, err := os.ReadFile(filepath.Join(home, ".codex-global-state.json"))
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +32,7 @@ func Load() ([]Project, error) {
 	var projects []Project
 	for _, p := range append(raw.ProjectOrder, raw.ElectronSavedWorkspaceRoots...) {
 		p = strings.TrimSpace(p)
-		if p == "" {
+		if !filepath.IsAbs(p) {
 			continue
 		}
 		abs, err := filepath.Abs(p)

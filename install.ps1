@@ -6,7 +6,7 @@ if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-$repo = "yashau/dexgram"
+$repo = "Xinbin1011/dexgram"
 $isUpdate = @("1", "true", "yes") -contains ([string]$env:UPDATE).ToLowerInvariant()
 $isUpdateHandoff = @("1", "true", "yes") -contains ([string]$env:DEXGRAM_UPDATE_HANDOFF).ToLowerInvariant()
 $binDir = Join-Path $env:LOCALAPPDATA "Dexgram"
@@ -50,7 +50,7 @@ try {
 } catch {
 }
 try {
-    irm https://raw.githubusercontent.com/yashau/dexgram/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/Xinbin1011/dexgram/main/install.ps1 | iex
 } catch {
     Write-Error `$_
     exit 1

@@ -30,6 +30,7 @@ type telegramAPIServer struct {
 	server *httptest.Server
 	mu     sync.Mutex
 	calls  []telegramAPICall
+	topics int
 }
 
 func newTelegramTestBot(t *testing.T) (*bot.Bot, *telegramAPIServer) {
@@ -52,16 +53,26 @@ func (s *telegramAPIServer) handle(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.calls = append(s.calls, telegramAPICall{Method: method, Body: string(body)})
+	if method == "createForumTopic" {
+		s.topics++
+	}
+	topicID := 76 + s.topics
 	s.mu.Unlock()
 
+	if method == "fake-attachment.txt" {
+		_, _ = w.Write([]byte("synthetic file round trip"))
+		return
+	}
 	var result any = true
 	switch method {
 	case "getMe":
 		result = map[string]any{"id": 1, "is_bot": true, "first_name": "Dexgram"}
-	case "sendMessage", "editMessageText", "editMessageReplyMarkup":
+	case "sendMessage", "editMessageText", "editMessageReplyMarkup", "sendDocument":
 		result = map[string]any{"message_id": 100, "date": 1, "chat": map[string]any{"id": 123, "type": "private"}}
 	case "createForumTopic":
-		result = map[string]any{"message_thread_id": 77, "name": "New chat"}
+		result = map[string]any{"message_thread_id": topicID, "name": "New chat"}
+	case "getFile":
+		result = map[string]any{"file_id": "fake", "file_unique_id": "fake", "file_path": "fake-attachment.txt"}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result})
 }

@@ -33,6 +33,7 @@ type app struct {
 	actions               map[string]turnAction
 	freshTopics           map[string]*pendingFreshTopic
 	sessionBrowsers       map[string]*sessionBrowser
+	historyBrowsers       map[string]*historyBrowser
 	approvals             map[string]*pendingApproval
 	inputs                map[string]*pendingInput
 	approvalSeq           atomic.Int64
@@ -100,6 +101,11 @@ type pendingFreshTopic struct {
 }
 
 type sessionBrowser struct {
+	mu              sync.Mutex
+	sections        []sessionSection
+	sectionIndex    int
+	desktopPins     map[string]codexprojects.Placement
+	pins            map[string]bool
 	chatID          int64
 	messageThreadID int
 	pendingFreshKey string
@@ -112,6 +118,7 @@ type sessionBrowser struct {
 }
 
 type sessionProjectGroup struct {
+	ID          string
 	Name        string
 	CWD         string
 	ThreadCount int

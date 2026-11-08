@@ -71,7 +71,7 @@ func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, m
 	queued := a.shouldQueuePrompt(ctx, key, session)
 	var turnID string
 	if !queued {
-		opts, optErr := a.turnOptions(ctx, session.client, collaborationMode)
+		opts, optErr := a.turnOptions(ctx, session.client, collaborationMode, chatID, messageThreadID)
 		if optErr != nil {
 			log.Printf("codex turn options failed: %v", optErr)
 			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
@@ -134,7 +134,7 @@ func (a *app) submitBuiltPrompt(ctx context.Context, b *bot.Bot, chatID int64, m
 				a.closeTopicSession(key, session)
 				session, err = a.startTopicSession(ctx, key, chatID, messageThreadID, displayText)
 				if err == nil {
-					opts, optErr = a.turnOptions(ctx, session.client, collaborationMode)
+					opts, optErr = a.turnOptions(ctx, session.client, collaborationMode, chatID, messageThreadID)
 					if optErr != nil {
 						err = optErr
 					} else {

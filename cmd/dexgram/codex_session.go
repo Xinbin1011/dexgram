@@ -471,6 +471,14 @@ func startTurn(ctx context.Context, c *codex.Client, threadID string, input []ma
 			"settings": settings,
 		}
 	}
+	if opts.CollaborationMode == "" {
+		if opts.Model != "" {
+			params["model"] = opts.Model
+		}
+		if opts.ReasoningEffort != "" {
+			params["effort"] = opts.ReasoningEffort
+		}
+	}
 	if err := c.Call(ctx, "turn/start", params, &out); err != nil {
 		return "", err
 	}
@@ -608,7 +616,7 @@ func (a *app) startNextQueuedTurn(ctx context.Context, key string, session *acti
 			return false
 		}
 
-		opts, err := a.turnOptions(ctx, session.client, queued.CollaborationMode)
+		opts, err := a.turnOptions(ctx, session.client, queued.CollaborationMode, queued.ChatID, queued.MessageThreadID)
 		if err != nil {
 			log.Printf("codex queued turn options failed: %v", err)
 			a.removeSessionTurn(key, queued.TurnID)

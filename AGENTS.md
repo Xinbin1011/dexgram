@@ -19,11 +19,11 @@ Side chats are Telegram topics created with `/side` or `/btw`. They are backed
 by native Codex `thread/fork`, keep the same project/cwd as the parent, and use
 a `↳N` topic-name prefix so they do not get confused with the main topic.
 
-Existing Codex sessions can be attached to Telegram topics through
-`/sessions [query]`. The browser lists projects first, then paginated threads
-inside a selected project. Attaching a session maps that topic to the existing
-Codex thread and syncs up to the most recent 25 rendered Telegram history
-messages.
+Existing Codex sessions can be attached through /sessions [query]. The menu
+uses registered Codex Desktop sections and projects, with a separate view for
+unassigned chats. Pins and per-topic model choices live in Dexgram SQLite.
+/history pages through saved turns using read-only app-server calls. /sendfile
+sends a file explicitly chosen from the current private topic’s workspace.
 
 Fresh unbound topics must not silently become projectless chats on the first
 prompt. Dexgram should first ask whether to resume an existing session, start a
