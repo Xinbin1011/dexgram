@@ -70,7 +70,7 @@ func (a *app) settingsText(chatID int64, threadID int) string {
 		"Model: " + settingLabel(model),
 		"Reasoning effort: " + settingLabel(effort),
 		"",
-		"Used for new messages and /plan turns in this topic. Auto uses Codex defaults.",
+		"Used for new messages and /plan turns in this topic. Auto leaves the choice to Codex.",
 	}, "\n")
 }
 

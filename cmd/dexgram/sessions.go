@@ -277,7 +277,11 @@ func (a *app) sessionBrowserThreadView(token string, browser *sessionBrowser) (s
 		rows = append(rows, []models.InlineKeyboardButton{{Text: "New chat in this project", CallbackData: fmt.Sprintf("sess:%s:new:%d", token, browser.projectIndex)}})
 	}
 	rows = append(rows, sessionNavRows(token, browser.page, sessionThreadsPerPage, len(order), "threads")...)
-	rows = append(rows, []models.InlineKeyboardButton{{Text: "Back to projects", CallbackData: "sess:" + token + ":back"}})
+	back := "Back to projects"
+	if browser.sections[browser.sectionIndex].ID == "other" {
+		back = "Back to sections"
+	}
+	rows = append(rows, []models.InlineKeyboardButton{{Text: back, CallbackData: "sess:" + token + ":back"}})
 	return fmt.Sprintf("%s\n%d chats", project.Name, len(order)), &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 

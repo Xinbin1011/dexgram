@@ -42,7 +42,7 @@ func reconcileCommands(ctx context.Context, b *bot.Bot, chatIDs []int64) error {
 		}
 		if _, err := b.SetChatMenuButton(ctx, &bot.SetChatMenuButtonParams{
 			ChatID:     chatID,
-			MenuButton: &models.MenuButtonCommands{},
+			MenuButton: &models.MenuButtonCommands{Type: models.MenuButtonTypeCommands},
 		}); err != nil {
 			log.Printf("set Telegram menu button for chat_id=%d: %v", chatID, err)
 		}
