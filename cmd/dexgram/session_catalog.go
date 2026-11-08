@@ -11,9 +11,18 @@ import (
 )
 
 type sessionSection struct {
-	ID       string
-	Name     string
-	Projects []sessionProjectGroup
+	ID          string
+	Name        string
+	Projects    []sessionProjectGroup
+	PinnedChats []sessionPinnedChat
+}
+
+const pinnedChatsSectionID = "codex-pins"
+
+type sessionPinnedChat struct {
+	ThreadIndex int
+	ProjectName string
+	RemoteTitle string
 }
 
 func buildSessionCatalog(threads []codex.Thread, sidebar codexprojects.Sidebar, mappings []state.Conversation, filter string) []sessionSection {
@@ -82,21 +91,34 @@ func buildSessionCatalog(threads []codex.Thread, sidebar codexprojects.Sidebar, 
 			addSessionChat(&sections[custom], project, i)
 		}
 	}
-	pinned := sessionSection{ID: "codex-pins", Name: "Pinned chats"}
+	pinned := sessionSection{ID: pinnedChatsSectionID, Name: "Pinned chats"}
 	added := map[string]bool{}
+	addLocalPin := func(i int) {
+		id := threads[i].ID
+		if added[id] {
+			return
+		}
+		pinned.PinnedChats = append(pinned.PinnedChats, sessionPinnedChat{ThreadIndex: i, ProjectName: chatProjects[i].Name})
+		added[id] = true
+	}
 	for _, id := range sidebar.PinnedThreadIDs {
-		if i, ok := chatIndices[id]; ok && !added[id] {
-			addSessionChat(&pinned, chatProjects[i], i)
-			added[id] = true
+		if i, ok := chatIndices[id]; ok {
+			addLocalPin(i)
 		}
 	}
 	for i, thread := range threads {
-		if !added[thread.ID] && sidebar.Threads[thread.ID].Pinned {
-			addSessionChat(&pinned, chatProjects[i], i)
-			added[thread.ID] = true
+		if sidebar.Threads[thread.ID].Pinned {
+			addLocalPin(i)
 		}
 	}
-	if len(pinned.Projects) > 0 {
+	for _, id := range sidebar.PinnedThreadIDs {
+		title := strings.TrimSpace(sidebar.RemotePinTitles[id])
+		if !added[id] && title != "" && strings.Contains(strings.ToLower(title), strings.ToLower(filter)) {
+			pinned.PinnedChats = append(pinned.PinnedChats, sessionPinnedChat{RemoteTitle: title})
+			added[id] = true
+		}
+	}
+	if len(pinned.PinnedChats) > 0 {
 		sections = append([]sessionSection{pinned}, sections...)
 	}
 	return sections
@@ -135,6 +157,21 @@ func (a *app) loadSessionCatalog(browser *sessionBrowser) error {
 	for _, conv := range mappings {
 		if conv.ChatID == browser.chatID {
 			own = append(own, conv)
+		}
+	}
+	if sidebar.RemotePinTitles == nil {
+		sidebar.RemotePinTitles = map[string]string{}
+	}
+	for _, id := range sidebar.PinnedThreadIDs {
+		if sidebar.RemotePinTitles[id] != "" {
+			continue
+		}
+		title, err := a.store.GetSetting("remote-pin-title:" + id)
+		if err != nil {
+			return err
+		}
+		if title != "" {
+			sidebar.RemotePinTitles[id] = title
 		}
 	}
 	browser.sections = buildSessionCatalog(browser.threads, sidebar, own, browser.query)

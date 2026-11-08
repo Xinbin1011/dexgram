@@ -203,14 +203,24 @@ func TestCatalogSeparatesSidebarPinsFromNamedPinnedSection(t *testing.T) {
 			"sqlite-pin":    {Pinned: true},
 		},
 		PinnedThreadIDs: []string{"desktop-pin", "remote-host-pin", "desktop-pin"},
+		RemotePinTitles: map[string]string{"remote-host-pin": "Remote pinned chat"},
 	}
-	threads := []codex.Thread{{ID: "desktop-pin"}, {ID: "named-section"}, {ID: "sqlite-pin"}}
+	threads := []codex.Thread{{ID: "desktop-pin", Name: "First pinned chat"}, {ID: "named-section"}, {ID: "sqlite-pin", Name: "Second pinned chat"}}
 	got := buildSessionCatalog(threads, sidebar, nil, "")
 	if len(got) != 4 || got[0].Name != "Pinned chats" || got[1].Name != "Pinned" {
 		t.Fatalf("wrong sections: %#v", got)
 	}
-	if !slices.Equal(got[0].Projects[0].ThreadIDs, []int{0}) || !slices.Equal(got[0].Projects[1].ThreadIDs, []int{2}) ||
+	pins := got[0].PinnedChats
+	if len(got[0].Projects) != 0 || len(pins) != 3 || pins[0].ThreadIndex != 0 ||
+		pins[0].ProjectName != "Project" || pins[1].ThreadIndex != 2 || pins[2].RemoteTitle != "Remote pinned chat" ||
 		!slices.Equal(got[1].Projects[0].ThreadIDs, []int{1}) {
 		t.Fatalf("wrong pin placement: %#v", got)
+	}
+	_, view := sessionBrowserPinnedView("token", 0, got[0], threads)
+	for i, want := range []string{"First pinned chat", "Second pinned chat", "Remote pinned chat (remote)"} {
+		row := view.InlineKeyboard[i]
+		if len(row) != 1 || row[0].Text != want || !strings.Contains(row[0].CallbackData, ":openpin:") {
+			t.Fatalf("pin %d: got %v, want direct chat button %q", i, row, want)
+		}
 	}
 }

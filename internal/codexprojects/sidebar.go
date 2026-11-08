@@ -28,6 +28,7 @@ type Sidebar struct {
 	Sections        []Section
 	Threads         map[string]Placement
 	PinnedThreadIDs []string
+	RemotePinTitles map[string]string
 }
 
 func Load() ([]Project, error) {
@@ -46,12 +47,14 @@ func LoadSidebar() (Sidebar, error) {
 	}
 	sidebar, err := readDesktopSidebar(filepath.Join(home, "state_5.sqlite"))
 	if err == nil {
-		sidebar.PinnedThreadIDs = readGlobalPins(home)
+		readGlobalPins(home, &sidebar)
 		return sidebar, nil
 	}
 	legacy, legacyErr := loadLegacy(home)
 	if legacyErr == nil {
-		return Sidebar{Projects: legacy, PinnedThreadIDs: readGlobalPins(home)}, nil
+		sidebar := Sidebar{Projects: legacy}
+		readGlobalPins(home, &sidebar)
+		return sidebar, nil
 	}
 	if errors.Is(err, os.ErrNotExist) && errors.Is(legacyErr, os.ErrNotExist) {
 		return Sidebar{}, nil
@@ -146,16 +149,52 @@ func readPlacements(db *sql.DB, sidebar *Sidebar) error {
 	return rows.Err()
 }
 
-func readGlobalPins(home string) []string {
+func readGlobalPins(home string, sidebar *Sidebar) {
 	data, err := os.ReadFile(filepath.Join(home, ".codex-global-state.json"))
 	if err != nil {
-		return nil
+		return
 	}
 	var desktop struct {
-		Pinned []string `json:"pinned-thread-ids"`
+		Pinned []string                   `json:"pinned-thread-ids"`
+		Atoms  map[string]json.RawMessage `json:"electron-persisted-atom-state"`
 	}
 	if err := json.Unmarshal(data, &desktop); err != nil {
-		return nil
+		return
 	}
-	return desktop.Pinned
+	pinned := map[string]bool{}
+	for _, id := range desktop.Pinned {
+		pinned[id] = id != ""
+	}
+	for id, place := range sidebar.Threads {
+		if place.Pinned {
+			pinned[id] = true
+		}
+	}
+	var order []string
+	_ = json.Unmarshal(desktop.Atoms["app-server-pinned-thread-order-v1"], &order)
+	seen := map[string]bool{}
+	for _, id := range append(order, desktop.Pinned...) {
+		if pinned[id] && !seen[id] {
+			sidebar.PinnedThreadIDs = append(sidebar.PinnedThreadIDs, id)
+			seen[id] = true
+		}
+	}
+	sidebar.RemotePinTitles = map[string]string{}
+	for key, raw := range desktop.Atoms {
+		if !strings.HasPrefix(key, "remote-thread-summaries-v3:") {
+			continue
+		}
+		var summaries []struct {
+			ID    string `json:"conversationId"`
+			Title string `json:"title"`
+		}
+		if err := json.Unmarshal(raw, &summaries); err != nil {
+			continue
+		}
+		for _, summary := range summaries {
+			if pinned[summary.ID] && summary.Title != "" {
+				sidebar.RemotePinTitles[summary.ID] = summary.Title
+			}
+		}
+	}
 }

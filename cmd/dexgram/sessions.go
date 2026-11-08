@@ -218,6 +218,9 @@ func (a *app) sessionBrowserView(token string, browser *sessionBrowser) (string,
 		}
 		return title, &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 	}
+	if section := browser.sections[browser.sectionIndex]; section.ID == pinnedChatsSectionID {
+		return sessionBrowserPinnedView(token, browser.page, section, browser.threads)
+	}
 	if browser.projectIndex < 0 {
 		return a.sessionBrowserProjectView(token, browser)
 	}
@@ -400,7 +403,7 @@ func (a *app) handleSessionBrowserCallback(ctx context.Context, b *bot.Bot, quer
 		return
 	}
 	switch action {
-	case "section", "proj", "attach", "new":
+	case "section", "proj", "attach", "openpin", "new":
 		if len(parts) != 4 {
 			return
 		}
@@ -427,7 +430,29 @@ func (a *app) handleSessionBrowserCallback(ctx context.Context, b *bot.Bot, quer
 			if index >= len(browser.threads) {
 				return
 			}
-			a.attachSessionFromBrowser(ctx, b, query, token, browser, browser.threads[index])
+			projectName := ""
+			if browser.projectIndex >= 0 {
+				projectName = browser.projects[browser.projectIndex].Name
+				if browser.projects[browser.projectIndex].ID == "" {
+					projectName = ""
+				}
+			}
+			a.attachSessionFromBrowser(ctx, b, query, token, browser, browser.threads[index], projectName)
+			return
+		case "openpin":
+			if browser.sectionIndex < 0 {
+				return
+			}
+			section := browser.sections[browser.sectionIndex]
+			if section.ID != pinnedChatsSectionID || index >= len(section.PinnedChats) {
+				return
+			}
+			pin := section.PinnedChats[index]
+			if pin.RemoteTitle != "" {
+				_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "Open this chat in Codex on its remote host.", ShowAlert: true})
+				return
+			}
+			a.attachSessionFromBrowser(ctx, b, query, token, browser, browser.threads[pin.ThreadIndex], pin.ProjectName)
 			return
 		case "new":
 			if index >= len(browser.projects) {
@@ -463,6 +488,9 @@ func (a *app) handleSessionBrowserCallback(ctx context.Context, b *bot.Bot, quer
 		view := "sections"
 		if browser.sectionIndex >= 0 {
 			view = "projects"
+			if browser.sections[browser.sectionIndex].ID == pinnedChatsSectionID {
+				view = "pins"
+			}
 		}
 		if browser.projectIndex >= 0 {
 			view = "threads"
@@ -526,7 +554,7 @@ func (a *app) applySessionPin(browser *sessionBrowser, parts []string) error {
 	return nil
 }
 
-func (a *app) attachSessionFromBrowser(ctx context.Context, b *bot.Bot, query *models.CallbackQuery, token string, browser *sessionBrowser, thread codex.Thread) {
+func (a *app) attachSessionFromBrowser(ctx context.Context, b *bot.Bot, query *models.CallbackQuery, token string, browser *sessionBrowser, thread codex.Thread, projectName string) {
 	key := fmt.Sprintf("%d:%d", browser.chatID, browser.messageThreadID)
 	if a.activeSession(key) != nil {
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "This topic already has an active Codex session.", ShowAlert: true})
@@ -535,13 +563,6 @@ func (a *app) attachSessionFromBrowser(ctx context.Context, b *bot.Bot, query *m
 	title := threadTitle(thread)
 	if title == "" {
 		title = "Codex session"
-	}
-	projectName := ""
-	if browser.projectIndex >= 0 {
-		project := browser.projects[browser.projectIndex]
-		if project.ID != "" {
-			projectName = project.Name
-		}
 	}
 	conv := state.Conversation{
 		ChatID:          browser.chatID,
@@ -608,4 +629,27 @@ func (a *app) attachSessionFromBrowser(ctx context.Context, b *bot.Bot, query *m
 		return
 	}
 	a.submitBuiltPrompt(ctx, b, pending.chatID, pending.messageThreadID, pending.replyMessageID, pending.input, pending.displayText, pending.collaborationMode)
+}
+
+func sessionBrowserPinnedView(token string, page int, section sessionSection, threads []codex.Thread) (string, *models.InlineKeyboardMarkup) {
+	total := len(section.PinnedChats)
+	start, end := pageBounds(page, sessionThreadsPerPage, total)
+	var rows [][]models.InlineKeyboardButton
+	for i := start; i < end; i++ {
+		pin := section.PinnedChats[i]
+		title := pin.RemoteTitle
+		if title != "" {
+			title = shortButtonLabel(title) + " (remote)"
+		} else {
+			title = threadTitle(threads[pin.ThreadIndex])
+			if title == "" {
+				title = "Untitled session"
+			}
+			title = shortButtonLabel(title)
+		}
+		rows = append(rows, []models.InlineKeyboardButton{{Text: title, CallbackData: fmt.Sprintf("sess:%s:openpin:%d", token, i)}})
+	}
+	rows = append(rows, sessionNavRows(token, page, sessionThreadsPerPage, total, "pins")...)
+	rows = append(rows, []models.InlineKeyboardButton{{Text: "Back to sections", CallbackData: "sess:" + token + ":sections"}})
+	return section.Name, &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
