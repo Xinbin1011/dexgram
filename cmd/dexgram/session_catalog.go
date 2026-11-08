@@ -61,6 +61,8 @@ func buildSessionCatalog(threads []codex.Thread, sidebar codexprojects.Sidebar, 
 			hints[conv.CodexThreadID] = project
 		}
 	}
+	chatIndices := map[string]int{}
+	chatProjects := make([]codexprojects.Project, len(threads))
 	for i, thread := range threads {
 		place, known := sidebar.Threads[thread.ID]
 		project := byID[place.ProjectID]
@@ -70,6 +72,7 @@ func buildSessionCatalog(threads []codex.Thread, sidebar codexprojects.Sidebar, 
 				project = byRoot[normalizeSessionPath(thread.Cwd)]
 			}
 		}
+		chatIndices[thread.ID], chatProjects[i] = i, project
 		index := projectsSection
 		if project.ID == "" {
 			index = otherSection
@@ -78,6 +81,23 @@ func buildSessionCatalog(threads []codex.Thread, sidebar codexprojects.Sidebar, 
 		if custom, ok := sectionIndex[place.SectionID]; ok {
 			addSessionChat(&sections[custom], project, i)
 		}
+	}
+	pinned := sessionSection{ID: "codex-pins", Name: "Pinned chats"}
+	added := map[string]bool{}
+	for _, id := range sidebar.PinnedThreadIDs {
+		if i, ok := chatIndices[id]; ok && !added[id] {
+			addSessionChat(&pinned, chatProjects[i], i)
+			added[id] = true
+		}
+	}
+	for i, thread := range threads {
+		if !added[thread.ID] && sidebar.Threads[thread.ID].Pinned {
+			addSessionChat(&pinned, chatProjects[i], i)
+			added[thread.ID] = true
+		}
+	}
+	if len(pinned.Projects) > 0 {
+		sections = append([]sessionSection{pinned}, sections...)
 	}
 	return sections
 }
@@ -118,7 +138,15 @@ func (a *app) loadSessionCatalog(browser *sessionBrowser) error {
 		}
 	}
 	browser.sections = buildSessionCatalog(browser.threads, sidebar, own, browser.query)
-	browser.desktopPins = sidebar.Threads
+	browser.desktopPins = map[string]bool{}
+	for id, place := range sidebar.Threads {
+		if place.Pinned {
+			browser.desktopPins[id] = true
+		}
+	}
+	for _, id := range sidebar.PinnedThreadIDs {
+		browser.desktopPins[id] = true
+	}
 	browser.pins, err = a.store.WorkspacePins(browser.chatID)
 	return err
 }
@@ -128,7 +156,7 @@ func (b *sessionBrowser) isPinned(key string) bool {
 		return pinned
 	}
 	id, isThread := strings.CutPrefix(key, "chat:")
-	return isThread && b.desktopPins[id].Pinned
+	return isThread && b.desktopPins[id]
 }
 
 func (b *sessionBrowser) orderedIndices(indices []int, key func(int) string) []int {

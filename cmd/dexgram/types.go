@@ -104,7 +104,7 @@ type sessionBrowser struct {
 	mu              sync.Mutex
 	sections        []sessionSection
 	sectionIndex    int
-	desktopPins     map[string]codexprojects.Placement
+	desktopPins     map[string]bool
 	pins            map[string]bool
 	chatID          int64
 	messageThreadID int

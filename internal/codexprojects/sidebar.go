@@ -2,6 +2,7 @@ package codexprojects
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"os"
@@ -23,9 +24,10 @@ type Placement struct {
 }
 
 type Sidebar struct {
-	Projects []Project
-	Sections []Section
-	Threads  map[string]Placement
+	Projects        []Project
+	Sections        []Section
+	Threads         map[string]Placement
+	PinnedThreadIDs []string
 }
 
 func Load() ([]Project, error) {
@@ -44,11 +46,12 @@ func LoadSidebar() (Sidebar, error) {
 	}
 	sidebar, err := readDesktopSidebar(filepath.Join(home, "state_5.sqlite"))
 	if err == nil {
+		sidebar.PinnedThreadIDs = readGlobalPins(home)
 		return sidebar, nil
 	}
 	legacy, legacyErr := loadLegacy(home)
 	if legacyErr == nil {
-		return Sidebar{Projects: legacy}, nil
+		return Sidebar{Projects: legacy, PinnedThreadIDs: readGlobalPins(home)}, nil
 	}
 	if errors.Is(err, os.ErrNotExist) && errors.Is(legacyErr, os.ErrNotExist) {
 		return Sidebar{}, nil
@@ -141,4 +144,18 @@ func readPlacements(db *sql.DB, sidebar *Sidebar) error {
 		sidebar.Threads[id] = place
 	}
 	return rows.Err()
+}
+
+func readGlobalPins(home string) []string {
+	data, err := os.ReadFile(filepath.Join(home, ".codex-global-state.json"))
+	if err != nil {
+		return nil
+	}
+	var desktop struct {
+		Pinned []string `json:"pinned-thread-ids"`
+	}
+	if err := json.Unmarshal(data, &desktop); err != nil {
+		return nil
+	}
+	return desktop.Pinned
 }

@@ -60,7 +60,7 @@ func TestPinsPersistPerChatAndCanOverrideDesktopPin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	browser := sessionBrowser{pins: pins, desktopPins: map[string]codexprojects.Placement{"t": {Pinned: true}}}
+	browser := sessionBrowser{pins: pins, desktopPins: map[string]bool{"t": true}}
 	if !browser.isPinned("section:one") || browser.isPinned("section:two") || browser.isPinned("chat:t") {
 		t.Fatalf("wrong pin state: %#v", pins)
 	}
@@ -189,5 +189,28 @@ func TestNewProjectTopicsKeepSeparateMappings(t *testing.T) {
 	if err != nil || len(mappings) != 2 || mappings[0].CWD != root || mappings[1].CWD != root ||
 		mappings[0].MessageThreadID == mappings[1].MessageThreadID {
 		t.Fatalf("wrong project topic mappings: %#v %v", mappings, err)
+	}
+}
+
+func TestCatalogSeparatesSidebarPinsFromNamedPinnedSection(t *testing.T) {
+	root := t.TempDir()
+	sidebar := codexprojects.Sidebar{
+		Projects: []codexprojects.Project{{ID: "p", Name: "Project", Path: root}},
+		Sections: []codexprojects.Section{{ID: "s", Name: "Pinned"}},
+		Threads: map[string]codexprojects.Placement{
+			"desktop-pin":   {ProjectID: "p"},
+			"named-section": {SectionID: "s"},
+			"sqlite-pin":    {Pinned: true},
+		},
+		PinnedThreadIDs: []string{"desktop-pin", "remote-host-pin", "desktop-pin"},
+	}
+	threads := []codex.Thread{{ID: "desktop-pin"}, {ID: "named-section"}, {ID: "sqlite-pin"}}
+	got := buildSessionCatalog(threads, sidebar, nil, "")
+	if len(got) != 4 || got[0].Name != "Pinned chats" || got[1].Name != "Pinned" {
+		t.Fatalf("wrong sections: %#v", got)
+	}
+	if !slices.Equal(got[0].Projects[0].ThreadIDs, []int{0}) || !slices.Equal(got[0].Projects[1].ThreadIDs, []int{2}) ||
+		!slices.Equal(got[1].Projects[0].ThreadIDs, []int{1}) {
+		t.Fatalf("wrong pin placement: %#v", got)
 	}
 }
