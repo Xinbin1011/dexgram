@@ -11,15 +11,19 @@ import (
 )
 
 type sessionSection struct {
-	ID          string
-	Name        string
-	Projects    []sessionProjectGroup
-	PinnedChats []sessionPinnedChat
+	ID       string
+	Name     string
+	Projects []sessionProjectGroup
+	Chats    []sessionChat
 }
 
 const pinnedChatsSectionID = "codex-pins"
 
-type sessionPinnedChat struct {
+func (s sessionSection) showsChatList() bool {
+	return s.ID == pinnedChatsSectionID || strings.HasPrefix(s.ID, "desktop:")
+}
+
+type sessionChat struct {
 	ThreadIndex int
 	ProjectName string
 	RemoteTitle string
@@ -88,8 +92,15 @@ func buildSessionCatalog(threads []codex.Thread, sidebar codexprojects.Sidebar, 
 		}
 		addSessionChat(&sections[index], project, i)
 		if custom, ok := sectionIndex[place.SectionID]; ok {
-			addSessionChat(&sections[custom], project, i)
+			sections[custom].Chats = append(sections[custom].Chats, sessionChat{ThreadIndex: i, ProjectName: project.Name})
 		}
+	}
+	for _, index := range sectionIndex {
+		chats := sections[index].Chats
+		sort.SliceStable(chats, func(i, j int) bool {
+			return sidebar.Threads[threads[chats[i].ThreadIndex].ID].SectionPosition <
+				sidebar.Threads[threads[chats[j].ThreadIndex].ID].SectionPosition
+		})
 	}
 	pinned := sessionSection{ID: pinnedChatsSectionID, Name: "Pinned chats"}
 	added := map[string]bool{}
@@ -98,7 +109,7 @@ func buildSessionCatalog(threads []codex.Thread, sidebar codexprojects.Sidebar, 
 		if added[id] {
 			return
 		}
-		pinned.PinnedChats = append(pinned.PinnedChats, sessionPinnedChat{ThreadIndex: i, ProjectName: chatProjects[i].Name})
+		pinned.Chats = append(pinned.Chats, sessionChat{ThreadIndex: i, ProjectName: chatProjects[i].Name})
 		added[id] = true
 	}
 	for _, id := range sidebar.PinnedThreadIDs {
@@ -114,11 +125,11 @@ func buildSessionCatalog(threads []codex.Thread, sidebar codexprojects.Sidebar, 
 	for _, id := range sidebar.PinnedThreadIDs {
 		title := strings.TrimSpace(sidebar.RemotePinTitles[id])
 		if !added[id] && title != "" && strings.Contains(strings.ToLower(title), strings.ToLower(filter)) {
-			pinned.PinnedChats = append(pinned.PinnedChats, sessionPinnedChat{RemoteTitle: title})
+			pinned.Chats = append(pinned.Chats, sessionChat{RemoteTitle: title})
 			added[id] = true
 		}
 	}
-	if len(pinned.PinnedChats) > 0 {
+	if len(pinned.Chats) > 0 {
 		sections = append([]sessionSection{pinned}, sections...)
 	}
 	return sections

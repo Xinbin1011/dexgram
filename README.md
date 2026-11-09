@@ -288,10 +288,11 @@ the stored Codex thread.
 ### Existing Sessions
 
 `/sessions [query]` uses the projects and custom sections registered in
-Codex Desktop. Chats without a project have their own list. Pins are saved for
-your Telegram chat and can override the pin badge and ordering. **Pinned chats**
-shows chat titles directly. Remote pins are labeled and must be opened on their
-Codex host. A custom section named **Pinned** is a separate view.
+Codex Desktop. A custom section shows its chats directly under its own name.
+Use **Manage pins** to pin or unpin an item for your Telegram chat, then tap
+**Done** to return to browsing. **Pinned chats** shows the desktop pins.
+Remote pins are labeled and must be opened on their Codex host. A custom
+section named **Pinned** is a separate view.
 
 Attaching a chat copies a recent page for context. Use `/history` to page back
 through all available completed turns without a total turn limit. The history

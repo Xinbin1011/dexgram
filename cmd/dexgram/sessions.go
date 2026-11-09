@@ -212,14 +212,15 @@ func (a *app) sessionBrowserView(token string, browser *sessionBrowser) (string,
 			rows = append(rows, browser.pinRow(token, section.Name, fmt.Sprintf("sess:%s:section:%d", token, i), "s", i, key))
 		}
 		rows = append(rows, sessionNavRows(token, browser.page, sessionProjectsPerPage, len(order), "sections")...)
+		rows = append(rows, browser.pinModeRow(token))
 		title := "Codex sections"
 		if browser.query != "" {
 			title += "\nFilter: " + browser.query
 		}
-		return title, &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+		return browser.pinModeTitle(title), &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 	}
-	if section := browser.sections[browser.sectionIndex]; section.ID == pinnedChatsSectionID {
-		return sessionBrowserPinnedView(token, browser.page, section, browser.threads)
+	if section := browser.sections[browser.sectionIndex]; section.showsChatList() {
+		return browser.sectionChatView(token, section)
 	}
 	if browser.projectIndex < 0 {
 		return a.sessionBrowserProjectView(token, browser)
@@ -228,15 +229,33 @@ func (a *app) sessionBrowserView(token string, browser *sessionBrowser) (string,
 }
 
 func (b *sessionBrowser) pinRow(token, label, action, kind string, index int, key string) []models.InlineKeyboardButton {
-	pin, value := "Pin", 1
-	if b.isPinned(key) {
+	pinned := b.isPinned(key)
+	if b.managingPins {
+		verb, value := "Pin ", 1
+		if pinned {
+			verb, value = "Unpin ", 0
+		}
+		label = verb + label
+		action = fmt.Sprintf("sess:%s:pin:%s:%d:%d", token, kind, index, value)
+	} else if pinned {
 		label = "📌 " + label
-		pin, value = "Unpin", 0
 	}
-	return []models.InlineKeyboardButton{
-		{Text: shortButtonLabel(label), CallbackData: action},
-		{Text: pin, CallbackData: fmt.Sprintf("sess:%s:pin:%s:%d:%d", token, kind, index, value)},
+	return []models.InlineKeyboardButton{{Text: label, CallbackData: action}}
+}
+
+func (b *sessionBrowser) pinModeRow(token string) []models.InlineKeyboardButton {
+	label := "Manage pins"
+	if b.managingPins {
+		label = "Done"
 	}
+	return []models.InlineKeyboardButton{{Text: label, CallbackData: "sess:" + token + ":managepins"}}
+}
+
+func (b *sessionBrowser) pinModeTitle(title string) string {
+	if b.managingPins {
+		return title + "\nTap a title to pin or unpin it."
+	}
+	return title
 }
 
 func (a *app) sessionBrowserProjectView(token string, browser *sessionBrowser) (string, *models.InlineKeyboardMarkup) {
@@ -259,8 +278,9 @@ func (a *app) sessionBrowserProjectView(token string, browser *sessionBrowser) (
 		}
 	}
 	rows = append(rows, sessionNavRows(token, browser.page, sessionProjectsPerPage, len(order), "projects")...)
+	rows = append(rows, browser.pinModeRow(token))
 	rows = append(rows, []models.InlineKeyboardButton{{Text: "Back to sections", CallbackData: "sess:" + token + ":sections"}})
-	return title, &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+	return browser.pinModeTitle(title), &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 func (a *app) sessionBrowserThreadView(token string, browser *sessionBrowser) (string, *models.InlineKeyboardMarkup) {
@@ -276,16 +296,17 @@ func (a *app) sessionBrowserThreadView(token string, browser *sessionBrowser) (s
 		}
 		rows = append(rows, browser.pinRow(token, title, fmt.Sprintf("sess:%s:attach:%d", token, i), "t", i, "chat:"+thread.ID))
 	}
-	if project.ID != "" && project.CWD != "" {
+	if !browser.managingPins && project.ID != "" && project.CWD != "" {
 		rows = append(rows, []models.InlineKeyboardButton{{Text: "New chat in this project", CallbackData: fmt.Sprintf("sess:%s:new:%d", token, browser.projectIndex)}})
 	}
 	rows = append(rows, sessionNavRows(token, browser.page, sessionThreadsPerPage, len(order), "threads")...)
+	rows = append(rows, browser.pinModeRow(token))
 	back := "Back to projects"
 	if browser.sections[browser.sectionIndex].ID == "other" {
 		back = "Back to sections"
 	}
 	rows = append(rows, []models.InlineKeyboardButton{{Text: back, CallbackData: "sess:" + token + ":back"}})
-	return fmt.Sprintf("%s\n%d chats", project.Name, len(order)), &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+	return browser.pinModeTitle(fmt.Sprintf("%s\n%d chats", project.Name, len(order))), &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 func pageBounds(page, perPage, total int) (int, int) {
@@ -403,7 +424,7 @@ func (a *app) handleSessionBrowserCallback(ctx context.Context, b *bot.Bot, quer
 		return
 	}
 	switch action {
-	case "section", "proj", "attach", "openpin", "new":
+	case "section", "proj", "attach", "openchat", "new":
 		if len(parts) != 4 {
 			return
 		}
@@ -417,6 +438,7 @@ func (a *app) handleSessionBrowserCallback(ctx context.Context, b *bot.Bot, quer
 				return
 			}
 			browser.sectionIndex, browser.projectIndex, browser.page = index, -1, 0
+			browser.managingPins = false
 			browser.projects = browser.sections[index].Projects
 			if len(browser.projects) == 1 && browser.projects[0].ID == "" {
 				browser.projectIndex = 0
@@ -426,6 +448,7 @@ func (a *app) handleSessionBrowserCallback(ctx context.Context, b *bot.Bot, quer
 				return
 			}
 			browser.projectIndex, browser.page = index, 0
+			browser.managingPins = false
 		case "attach":
 			if index >= len(browser.threads) {
 				return
@@ -439,20 +462,20 @@ func (a *app) handleSessionBrowserCallback(ctx context.Context, b *bot.Bot, quer
 			}
 			a.attachSessionFromBrowser(ctx, b, query, token, browser, browser.threads[index], projectName)
 			return
-		case "openpin":
+		case "openchat":
 			if browser.sectionIndex < 0 {
 				return
 			}
 			section := browser.sections[browser.sectionIndex]
-			if section.ID != pinnedChatsSectionID || index >= len(section.PinnedChats) {
+			if !section.showsChatList() || index >= len(section.Chats) {
 				return
 			}
-			pin := section.PinnedChats[index]
-			if pin.RemoteTitle != "" {
+			chat := section.Chats[index]
+			if chat.RemoteTitle != "" {
 				_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "Open this chat in Codex on its remote host.", ShowAlert: true})
 				return
 			}
-			a.attachSessionFromBrowser(ctx, b, query, token, browser, browser.threads[pin.ThreadIndex], pin.ProjectName)
+			a.attachSessionFromBrowser(ctx, b, query, token, browser, browser.threads[chat.ThreadIndex], chat.ProjectName)
 			return
 		case "new":
 			if index >= len(browser.projects) {
@@ -469,6 +492,7 @@ func (a *app) handleSessionBrowserCallback(ctx context.Context, b *bot.Bot, quer
 	case "sections":
 		browser.sectionIndex, browser.projectIndex, browser.page = -1, -1, 0
 		browser.projects = nil
+		browser.managingPins = false
 	case "back":
 		if browser.sectionIndex < 0 {
 			return
@@ -477,6 +501,7 @@ func (a *app) handleSessionBrowserCallback(ctx context.Context, b *bot.Bot, quer
 			browser.sectionIndex, browser.projects = -1, nil
 		}
 		browser.projectIndex, browser.page = -1, 0
+		browser.managingPins = false
 	case "page":
 		if len(parts) != 5 {
 			return
@@ -488,8 +513,8 @@ func (a *app) handleSessionBrowserCallback(ctx context.Context, b *bot.Bot, quer
 		view := "sections"
 		if browser.sectionIndex >= 0 {
 			view = "projects"
-			if browser.sections[browser.sectionIndex].ID == pinnedChatsSectionID {
-				view = "pins"
+			if browser.sections[browser.sectionIndex].showsChatList() {
+				view = "chats"
 			}
 		}
 		if browser.projectIndex >= 0 {
@@ -499,6 +524,8 @@ func (a *app) handleSessionBrowserCallback(ctx context.Context, b *bot.Bot, quer
 			return
 		}
 		browser.page = page
+	case "managepins":
+		browser.managingPins = !browser.managingPins
 	case "pin":
 		if err := a.applySessionPin(browser, parts); err != nil {
 			_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "Could not update this pin.", ShowAlert: true})
@@ -631,25 +658,37 @@ func (a *app) attachSessionFromBrowser(ctx context.Context, b *bot.Bot, query *m
 	a.submitBuiltPrompt(ctx, b, pending.chatID, pending.messageThreadID, pending.replyMessageID, pending.input, pending.displayText, pending.collaborationMode)
 }
 
-func sessionBrowserPinnedView(token string, page int, section sessionSection, threads []codex.Thread) (string, *models.InlineKeyboardMarkup) {
-	total := len(section.PinnedChats)
-	start, end := pageBounds(page, sessionThreadsPerPage, total)
+func (b *sessionBrowser) sectionChatView(token string, section sessionSection) (string, *models.InlineKeyboardMarkup) {
+	total := len(section.Chats)
+	start, end := pageBounds(b.page, sessionThreadsPerPage, total)
+	isNativePins := section.ID == pinnedChatsSectionID
 	var rows [][]models.InlineKeyboardButton
 	for i := start; i < end; i++ {
-		pin := section.PinnedChats[i]
-		title := pin.RemoteTitle
-		if title != "" {
-			title = shortButtonLabel(title) + " (remote)"
-		} else {
-			title = threadTitle(threads[pin.ThreadIndex])
-			if title == "" {
-				title = "Untitled session"
-			}
-			title = shortButtonLabel(title)
+		chat := section.Chats[i]
+		action := fmt.Sprintf("sess:%s:openchat:%d", token, i)
+		if chat.RemoteTitle != "" {
+			rows = append(rows, []models.InlineKeyboardButton{{Text: chat.RemoteTitle + " (remote)", CallbackData: action}})
+			continue
 		}
-		rows = append(rows, []models.InlineKeyboardButton{{Text: title, CallbackData: fmt.Sprintf("sess:%s:openpin:%d", token, i)}})
+		thread := b.threads[chat.ThreadIndex]
+		title := threadTitle(thread)
+		if title == "" {
+			title = "Untitled session"
+		}
+		if isNativePins {
+			rows = append(rows, []models.InlineKeyboardButton{{Text: title, CallbackData: action}})
+		} else {
+			rows = append(rows, b.pinRow(token, title, action, "t", chat.ThreadIndex, "chat:"+thread.ID))
+		}
 	}
-	rows = append(rows, sessionNavRows(token, page, sessionThreadsPerPage, total, "pins")...)
+	rows = append(rows, sessionNavRows(token, b.page, sessionThreadsPerPage, total, "chats")...)
+	title := section.Name
+	if !isNativePins {
+		title = b.pinModeTitle(fmt.Sprintf("%s\n%d chats", title, total))
+		if total > 0 {
+			rows = append(rows, b.pinModeRow(token))
+		}
+	}
 	rows = append(rows, []models.InlineKeyboardButton{{Text: "Back to sections", CallbackData: "sess:" + token + ":sections"}})
-	return section.Name, &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+	return title, &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }

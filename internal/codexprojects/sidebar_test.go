@@ -18,10 +18,10 @@ func TestReadDesktopSidebar(t *testing.T) {
 		CREATE TABLE projects(id TEXT, name TEXT, position INTEGER);
 		CREATE TABLE project_roots(project_id TEXT, path TEXT, position INTEGER);
 		CREATE TABLE thread_sections(id TEXT, name TEXT);
-		CREATE TABLE threads(id TEXT, project_id TEXT, thread_section_id TEXT, is_pinned INTEGER, archived INTEGER);
+		CREATE TABLE threads(id TEXT, project_id TEXT, thread_section_id TEXT, is_pinned INTEGER, archived INTEGER, section_position INTEGER);
 		INSERT INTO projects VALUES ('p','Registered project',0);
 		INSERT INTO thread_sections VALUES ('s','My section');
-		INSERT INTO threads VALUES ('t','p','s',1,0), ('old','p',NULL,0,1);
+		INSERT INTO threads VALUES ('t','p','s',1,0,10), ('old','p',NULL,0,1,NULL);
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestReadDesktopSidebar(t *testing.T) {
 	if len(sidebar.Sections) != 1 || sidebar.Sections[0].Name != "My section" {
 		t.Fatalf("wrong sections: %#v", sidebar.Sections)
 	}
-	if len(sidebar.Threads) != 1 || sidebar.Threads["t"] != (Placement{ProjectID: "p", SectionID: "s", Pinned: true}) {
+	if len(sidebar.Threads) != 1 || sidebar.Threads["t"] != (Placement{ProjectID: "p", SectionID: "s", SectionPosition: 10, Pinned: true}) {
 		t.Fatalf("wrong placement: %#v", sidebar.Threads)
 	}
 }

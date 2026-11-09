@@ -18,9 +18,10 @@ type Section struct {
 }
 
 type Placement struct {
-	ProjectID string
-	SectionID string
-	Pinned    bool
+	ProjectID       string
+	SectionID       string
+	SectionPosition int64
+	Pinned          bool
 }
 
 type Sidebar struct {
@@ -132,7 +133,12 @@ func readSections(db *sql.DB, sidebar *Sidebar) error {
 }
 
 func readPlacements(db *sql.DB, sidebar *Sidebar) error {
-	rows, err := db.Query("SELECT id, COALESCE(project_id,''), COALESCE(thread_section_id,''), COALESCE(is_pinned,0) FROM threads WHERE archived=0")
+	const columns = "SELECT id, COALESCE(project_id,''), COALESCE(thread_section_id,''), COALESCE(is_pinned,0), "
+	const from = " FROM threads WHERE archived=0"
+	rows, err := db.Query(columns + "COALESCE(section_position,0)" + from)
+	if err != nil && strings.Contains(err.Error(), "no such column: section_position") {
+		rows, err = db.Query(columns + "0" + from)
+	}
 	if err != nil {
 		return err
 	}
@@ -141,7 +147,7 @@ func readPlacements(db *sql.DB, sidebar *Sidebar) error {
 	for rows.Next() {
 		var id string
 		var place Placement
-		if err := rows.Scan(&id, &place.ProjectID, &place.SectionID, &place.Pinned); err != nil {
+		if err := rows.Scan(&id, &place.ProjectID, &place.SectionID, &place.Pinned, &place.SectionPosition); err != nil {
 			return err
 		}
 		sidebar.Threads[id] = place

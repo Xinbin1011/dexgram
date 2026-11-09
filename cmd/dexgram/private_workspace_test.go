@@ -22,8 +22,8 @@ func TestCatalogUsesRegisteredProjectsAndActualMembership(t *testing.T) {
 		Projects: []codexprojects.Project{{ID: "p", Name: "Real project", Path: root}},
 		Sections: []codexprojects.Section{{ID: "s", Name: "Section"}},
 		Threads: map[string]codexprojects.Placement{
-			"t": {ProjectID: "p", SectionID: "s"},
-			"u": {},
+			"t": {ProjectID: "p", SectionID: "s", SectionPosition: 2},
+			"u": {SectionID: "s", SectionPosition: 1},
 		},
 	}
 	threads := []codex.Thread{
@@ -34,10 +34,21 @@ func TestCatalogUsesRegisteredProjectsAndActualMembership(t *testing.T) {
 	}
 	mappings := []state.Conversation{{CodexThreadID: "w", ProjectName: "Real project", CWD: root}}
 	sections := buildSessionCatalog(threads, sidebar, mappings, "")
-	if len(sections) != 3 || !slices.Equal(sections[0].Projects[0].ThreadIDs, []int{0}) ||
+	if len(sections) != 3 || !slices.Equal(sections[0].Chats, []sessionChat{{ThreadIndex: 1}, {ThreadIndex: 0, ProjectName: "Real project"}}) ||
 		sections[1].Projects[0].Name != "Real project" || !slices.Equal(sections[1].Projects[0].ThreadIDs, []int{0, 3}) ||
 		len(sections[2].Projects) != 1 || sections[2].Projects[0].ID != "" || !slices.Equal(sections[2].Projects[0].ThreadIDs, []int{1, 2}) {
 		t.Fatalf("wrong catalog: %#v", sections)
+	}
+	browser := sessionBrowser{sections: sections, sectionIndex: 0, projectIndex: -1, threads: threads}
+	a := app{}
+	title, view := a.sessionBrowserView("token", &browser)
+	if title != "Section\n2 chats" || len(view.InlineKeyboard[0]) != 1 || view.InlineKeyboard[0][0].CallbackData != "sess:token:openchat:0" {
+		t.Fatalf("wrong section view: %q, %v", title, view.InlineKeyboard)
+	}
+	browser.managingPins = true
+	_, view = a.sessionBrowserView("token", &browser)
+	if got := view.InlineKeyboard[0][0].CallbackData; got != "sess:token:pin:t:1:1" {
+		t.Fatalf("pin mode should target the first listed thread, got %q", got)
 	}
 }
 
@@ -210,16 +221,17 @@ func TestCatalogSeparatesSidebarPinsFromNamedPinnedSection(t *testing.T) {
 	if len(got) != 4 || got[0].Name != "Pinned chats" || got[1].Name != "Pinned" {
 		t.Fatalf("wrong sections: %#v", got)
 	}
-	pins := got[0].PinnedChats
+	pins := got[0].Chats
 	if len(got[0].Projects) != 0 || len(pins) != 3 || pins[0].ThreadIndex != 0 ||
 		pins[0].ProjectName != "Project" || pins[1].ThreadIndex != 2 || pins[2].RemoteTitle != "Remote pinned chat" ||
-		!slices.Equal(got[1].Projects[0].ThreadIDs, []int{1}) {
+		!slices.Equal(got[1].Chats, []sessionChat{{ThreadIndex: 1}}) {
 		t.Fatalf("wrong pin placement: %#v", got)
 	}
-	_, view := sessionBrowserPinnedView("token", 0, got[0], threads)
+	browser := sessionBrowser{threads: threads}
+	_, view := browser.sectionChatView("token", got[0])
 	for i, want := range []string{"First pinned chat", "Second pinned chat", "Remote pinned chat (remote)"} {
 		row := view.InlineKeyboard[i]
-		if len(row) != 1 || row[0].Text != want || !strings.Contains(row[0].CallbackData, ":openpin:") {
+		if len(row) != 1 || row[0].Text != want || !strings.Contains(row[0].CallbackData, ":openchat:") {
 			t.Fatalf("pin %d: got %v, want direct chat button %q", i, row, want)
 		}
 	}

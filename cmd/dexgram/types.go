@@ -114,6 +114,7 @@ type sessionBrowser struct {
 	projects        []sessionProjectGroup
 	projectIndex    int
 	page            int
+	managingPins    bool
 	createdAt       time.Time
 }
 
