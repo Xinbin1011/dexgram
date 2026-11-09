@@ -19,6 +19,7 @@ import (
 )
 
 const maxAppServerStderrLineLen = 2000
+const maxAppServerResponseBytes = 64 * 1024 * 1024
 const maxAppServerParseBufferLen = 1024 * 1024
 const maxAppServerParseBufferLines = 1000
 
@@ -447,9 +448,10 @@ func (c *Client) writeJSON(v any) error {
 
 func (c *Client) readStdout() {
 	defer c.readers.Done()
+	defer func() { _ = c.stdout.Close() }()
 	scanner := bufio.NewScanner(c.stdout)
 	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 16*1024*1024)
+	scanner.Buffer(buf, maxAppServerResponseBytes)
 	var pending *pendingParse
 	for scanner.Scan() {
 		line := strings.TrimSuffix(scanner.Text(), "\r")
@@ -481,6 +483,11 @@ func (c *Client) readStdout() {
 			case <-c.closed:
 			default:
 				c.reportError(fmt.Errorf("read app-server stdout: %w", err))
+				// No more responses can be read. Let pending calls see the
+				// connection close and let the bridge start a fresh client.
+				if c.cmd != nil && c.cmd.Process != nil {
+					_ = c.cmd.Process.Kill()
+				}
 			}
 		}
 	}

@@ -211,6 +211,34 @@ func TestClientCallReturnsRPCErrorAndForgetsPending(t *testing.T) {
 	}
 }
 
+func TestClientReadsLargeHistoryResponse(t *testing.T) {
+	client, stdinReader, stdoutWriter := newPipeClient(t)
+	defer func() {
+		_ = stdinReader.Close()
+		_ = stdoutWriter.Close()
+	}()
+	const historySize = 19 * 1024 * 1024
+	go func() {
+		req, err := readRPCLine(stdinReader)
+		if err != nil || req.ID == nil {
+			return
+		}
+		_, _ = io.WriteString(stdoutWriter, `{"id":`+itoa(*req.ID)+`,"result":{"history":"`+strings.Repeat("x", historySize)+`"}}`+"\n")
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var result struct {
+		History string `json:"history"`
+	}
+	if err := client.Call(ctx, "thread/turns/list", nil, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.History) != historySize {
+		t.Fatalf("received %d history bytes, want %d", len(result.History), historySize)
+	}
+}
+
 func TestClientCallForgetsPendingOnContextCancel(t *testing.T) {
 	client, stdinReader, stdoutWriter := newPipeClient(t)
 	defer func() {

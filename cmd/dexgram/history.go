@@ -17,6 +17,7 @@ import (
 )
 
 const historyPageSize = 6
+const historyReadTimeout = 20 * time.Second
 
 type historyBrowser struct {
 	mu       sync.Mutex
@@ -40,6 +41,8 @@ func (a *app) readHistoryPage(ctx context.Context, conv state.Conversation, curs
 }
 
 func readHistoryPage(ctx context.Context, client *codex.Client, threadID, cursor string) ([]codex.Turn, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, historyReadTimeout)
+	defer cancel()
 	anchor, legacy := strings.CutPrefix(cursor, "legacy:")
 	if !legacy {
 		params := map[string]any{"threadId": threadID, "limit": historyPageSize, "itemsView": "full", "sortDirection": "desc"}
