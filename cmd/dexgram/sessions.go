@@ -585,6 +585,12 @@ func (a *app) applySessionPin(browser *sessionBrowser, parts []string) error {
 
 func (a *app) attachSessionFromBrowser(ctx context.Context, b *bot.Bot, query *models.CallbackQuery, token string, browser *sessionBrowser, thread codex.Thread, projectName string) {
 	key := fmt.Sprintf("%d:%d", browser.chatID, browser.messageThreadID)
+	unlock := a.lockTopicPrompt(key)
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
 	if a.activeSession(key) != nil {
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "This topic already has an active Codex session.", ShowAlert: true})
 		return
@@ -657,6 +663,8 @@ func (a *app) attachSessionFromBrowser(ctx context.Context, b *bot.Bot, query *m
 	if _, ok := pendingFreshTopicCommandName(pending); ok {
 		return
 	}
+	unlock()
+	unlock = nil
 	a.submitBuiltPrompt(ctx, b, pending.chatID, pending.messageThreadID, pending.replyMessageID, pending.input, pending.displayText, pending.collaborationMode)
 }
 

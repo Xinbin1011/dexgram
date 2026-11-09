@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"dexgram/internal/codex"
 	"dexgram/internal/state"
 
 	"github.com/fsnotify/fsnotify"
@@ -74,17 +73,6 @@ func TestMirrorWorkingDirKeepsExistingProjectCWD(t *testing.T) {
 	}
 	if path != dir || missingDir {
 		t.Fatalf("mirrorWorkingDir existing project = %q, %v; want %q, false", path, missingDir, dir)
-	}
-}
-
-func TestCompletedTurnsAfterMarkerReportsMissingMarker(t *testing.T) {
-	turns := []codex.Turn{{ID: "t1", Status: "completed"}, {ID: "t2", Status: "completed"}}
-	got, found := completedTurnsAfterMarker(turns, "missing")
-	if found {
-		t.Fatal("expected missing marker to be reported")
-	}
-	if len(got) != 0 {
-		t.Fatalf("expected no turns when marker is missing, got %#v", got)
 	}
 }
 

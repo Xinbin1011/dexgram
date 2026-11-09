@@ -543,7 +543,7 @@ func renderTelegramMessages(markdown string, max int) []renderedTelegramMessage 
 	if markdown == "" {
 		return nil
 	}
-	converted := tgmd.Convert(markdown)
+	converted := tgmd.Convert(wrapTelegramTables(markdown))
 	chunks := tgmd.Split(tgmd.Message{
 		Text:     converted.Text,
 		Entities: converted.Entities,

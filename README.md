@@ -302,8 +302,8 @@ recently active topics and mirrors new completed Desktop turns.
 Old inactive mappings remain available for `/sessions`, `/status`, and manual
 `/sync`, but they do not keep live mirror workers running. Mirrored Desktop
 replies include the Desktop prompt as a Markdown quote before the answer.
-Manual `/sync [limit]` is also bounded: one completed turn by default, five at
-most.
+Manual `/sync [limit]` reads saved replies even while Codex Desktop has the
+chat open. It sends one completed turn by default and five at most.
 
 Dexgram also mirrors Telegram prompts back into the Codex Desktop transcript.
 When a Telegram message is sent into an existing Codex thread after at least one

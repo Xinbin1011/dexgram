@@ -2,39 +2,46 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 
 	"dexgram/internal/codex"
 )
 
-func TestUnsyncedTurnsReturnsLatestCompletedWhenNoMarker(t *testing.T) {
-	turns := []codex.Turn{
-		{ID: "t1", Status: "completed"},
-		{ID: "t2", Status: "running"},
-		{ID: "t3", Status: "completed"},
-	}
+type syncTestRPC func(string, any, any) error
 
-	got := unsyncedTurns(turns, "")
-	want := []codex.Turn{turns[2]}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("unsyncedTurns = %#v, want %#v", got, want)
-	}
+func (call syncTestRPC) Call(_ context.Context, method string, params, out any) error {
+	return call(method, params, out)
 }
 
-func TestUnsyncedTurnsAfterMarkerOnlyIncludesCompletedTurns(t *testing.T) {
-	turns := []codex.Turn{
-		{ID: "t1", Status: "completed"},
-		{ID: "t2", Status: "running"},
-		{ID: "t3", Status: "completed"},
-		{ID: "t4", Status: "failed"},
-		{ID: "t5", Status: "completed"},
-	}
+func TestReadSyncHistoryUsesReadOnlyPagesAndKeepsNewestUnsyncedTurns(t *testing.T) {
+	var fullPages []string
+	client := syncTestRPC(func(method string, params, out any) error {
+		if method != "thread/turns/list" {
+			t.Fatalf("unexpected RPC method %q", method)
+		}
+		request := params.(map[string]any)
+		cursor, _ := request["cursor"].(string)
+		if request["itemsView"] == "full" {
+			fullPages = append(fullPages, cursor)
+		}
+		response := `{"data":[{"id":"working","status":"inProgress"},{"id":"newest","status":"completed"},{"id":"next","status":"completed"}],"nextCursor":"older"}`
+		if cursor == "older" {
+			response = `{"data":[{"id":"third","status":"completed"},{"id":"marker","status":"completed"}]}`
+		}
+		return json.Unmarshal([]byte(response), out)
+	})
 
-	got := unsyncedTurns(turns, "t2")
-	want := []codex.Turn{turns[2], turns[4]}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("unsyncedTurns = %#v, want %#v", got, want)
+	history, err := readSyncHistory(context.Background(), client, "thread", "marker", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !history.foundMarker || history.latest != "newest" || len(history.turns) != 2 ||
+		history.turns[0].ID != "next" || history.turns[1].ID != "newest" ||
+		!slices.Equal(fullPages, []string{""}) {
+		t.Fatalf("history = %#v, full pages = %#v", history, fullPages)
 	}
 }
 

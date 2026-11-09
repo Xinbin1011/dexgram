@@ -272,6 +272,15 @@ WHERE chat_id = ? AND message_thread_id = ?`,
 	return err
 }
 
+func (s *Store) SetSyncMarker(conv Conversation, turnID string) error {
+	_, err := s.db.Exec(`
+UPDATE conversations
+SET last_synced_turn_id = ?
+WHERE chat_id = ? AND message_thread_id = ? AND codex_thread_id = ?`,
+		turnID, conv.ChatID, conv.MessageThreadID, conv.CodexThreadID)
+	return err
+}
+
 func (s *Store) ClearTelegramActivity(chatID int64, messageThreadID int) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`

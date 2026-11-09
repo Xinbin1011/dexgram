@@ -40,12 +40,20 @@ func (a *app) readHistoryPage(ctx context.Context, conv state.Conversation, curs
 	return readHistoryPage(ctx, client, conv.CodexThreadID, cursor)
 }
 
-func readHistoryPage(ctx context.Context, client *codex.Client, threadID, cursor string) ([]codex.Turn, string, error) {
+type historyRPC interface {
+	Call(context.Context, string, any, any) error
+}
+
+func readHistoryPage(ctx context.Context, client historyRPC, threadID, cursor string) ([]codex.Turn, string, error) {
+	return readTurnHistoryPage(ctx, client, threadID, cursor, "full")
+}
+
+func readTurnHistoryPage(ctx context.Context, client historyRPC, threadID, cursor, itemsView string) ([]codex.Turn, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, historyReadTimeout)
 	defer cancel()
 	anchor, legacy := strings.CutPrefix(cursor, "legacy:")
 	if !legacy {
-		params := map[string]any{"threadId": threadID, "limit": historyPageSize, "itemsView": "full", "sortDirection": "desc"}
+		params := map[string]any{"threadId": threadID, "limit": historyPageSize, "itemsView": itemsView, "sortDirection": "desc"}
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
@@ -69,6 +77,69 @@ func readHistoryPage(ctx context.Context, client *codex.Client, threadID, cursor
 		return nil, "", err
 	}
 	return legacyHistoryPage(read.Thread.Turns, anchor)
+}
+
+type syncHistory struct {
+	latest      string
+	turns       []codex.Turn
+	foundMarker bool
+}
+
+// A zero limit mirrors every new turn, or only establishes a baseline when
+// there is no marker. Manual sync without a marker sends the latest turn.
+func readSyncHistory(ctx context.Context, client historyRPC, threadID, marker string, limit int) (syncHistory, error) {
+	ctx, cancel := context.WithTimeout(ctx, historyReadTimeout)
+	defer cancel()
+	var history syncHistory
+	for cursor := ""; ; {
+		page, next, err := readTurnHistoryPage(ctx, client, threadID, cursor, "notLoaded")
+		if err != nil {
+			return syncHistory{}, err
+		}
+		var wanted []string
+		for _, turn := range page {
+			if history.latest == "" && turn.Status == "completed" {
+				history.latest = turn.ID
+			}
+			if turn.ID == marker && marker != "" {
+				history.foundMarker = true
+				break
+			}
+			if turn.Status != "completed" {
+				continue
+			}
+			if (limit > 0 && len(history.turns)+len(wanted) < limit) || (limit == 0 && marker != "") {
+				wanted = append(wanted, turn.ID)
+			}
+			if marker == "" {
+				break
+			}
+		}
+		if len(wanted) > 0 {
+			full, _, err := readHistoryPage(ctx, client, threadID, cursor)
+			if err != nil {
+				return syncHistory{}, err
+			}
+			before := len(history.turns)
+			for _, turn := range full {
+				if turn.Status == "completed" && slices.Contains(wanted, turn.ID) {
+					history.turns = append(history.turns, turn)
+				}
+			}
+			if len(history.turns)-before != len(wanted) {
+				return syncHistory{}, fmt.Errorf("Codex history changed while syncing")
+			}
+		}
+		if history.foundMarker || next == "" || (marker == "" && history.latest != "") {
+			break
+		}
+		cursor = next
+	}
+	if marker != "" && !history.foundMarker {
+		history.turns = nil
+	}
+	slices.Reverse(history.turns)
+	return history, nil
 }
 
 func legacyHistoryPage(turns []codex.Turn, anchor string) ([]codex.Turn, string, error) {

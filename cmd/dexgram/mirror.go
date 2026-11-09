@@ -190,9 +190,20 @@ func (a *app) mirrorConversation(ctx context.Context, key string, conv state.Con
 }
 
 func (a *app) mirrorConversationOnce(ctx context.Context, key string, conv state.Conversation) (state.Conversation, bool) {
+	unlock := a.lockTopicPrompt(key)
+	defer unlock()
 	if a.activeSession(key) != nil {
 		return conv, false
 	}
+	current, ok, err := a.store.Get(conv.ChatID, conv.MessageThreadID)
+	if err != nil {
+		log.Printf("read desktop mirror mapping key=%s: %v", key, err)
+		return conv, false
+	}
+	if !ok || current.CodexThreadID != conv.CodexThreadID {
+		return conv, true
+	}
+	conv = current
 	c, err := a.startCodexAppServer(ctx, codex.StartOptions{
 		CLIPath:    a.cfg.Codex.CLIPath,
 		WorkingDir: appServerWorkingDir(conv),
@@ -225,66 +236,37 @@ func (a *app) mirrorConversationOnce(ctx context.Context, key string, conv state
 }
 
 func (a *app) mirrorCompletedDesktopTurns(ctx context.Context, c *codex.Client, key string, conv state.Conversation) (state.Conversation, error) {
-	resume, err := a.resumeCodexThreadResult(ctx, c, conv.CodexThreadID)
+	history, err := readSyncHistory(ctx, c, conv.CodexThreadID, conv.LastSyncedTurnID, 0)
 	if err != nil {
 		return conv, err
 	}
-	thread := resume.Thread
-	if len(thread.Turns) == 0 {
-		var read codex.ThreadReadResponse
-		if err := c.Call(ctx, "thread/read", map[string]any{"threadId": conv.CodexThreadID}, &read); err != nil {
-			return conv, err
-		}
-		thread = read.Thread
-	}
-	if len(thread.Turns) == 0 {
+	if history.latest == "" {
 		return conv, nil
 	}
-	if conv.LastSyncedTurnID == "" {
-		latest := latestCompletedTurnID(thread.Turns)
-		if latest == "" {
-			return conv, nil
-		}
-		conv.LastSyncedTurnID = latest
-		if err := a.store.Upsert(conv); err != nil {
+	if !history.foundMarker {
+		if err := a.store.SetSyncMarker(conv, history.latest); err != nil {
 			return conv, err
 		}
-		log.Printf("desktop mirror initialized sync marker key=%s thread_id=%s turn_id=%s", key, conv.CodexThreadID, latest)
+		log.Printf("desktop mirror set sync marker key=%s thread_id=%s turn_id=%s", key, conv.CodexThreadID, history.latest)
+		conv.LastSyncedTurnID = history.latest
 		return conv, nil
 	}
-
-	turns, found := completedTurnsAfterMarker(thread.Turns, conv.LastSyncedTurnID)
-	if !found {
-		latest := latestCompletedTurnID(thread.Turns)
-		if latest != "" && latest != conv.LastSyncedTurnID {
-			log.Printf("desktop mirror marker not found key=%s thread_id=%s marker=%s latest=%s", key, conv.CodexThreadID, conv.LastSyncedTurnID, latest)
-			conv.LastSyncedTurnID = latest
-			if err := a.store.Upsert(conv); err != nil {
+	for _, turn := range history.turns {
+		if !a.shouldSkipTelegramOriginTurn(conv.CodexThreadID, turn) {
+			if err := renderHistoricalTurnSilent(ctx, a.bot, conv.ChatID, conv.MessageThreadID, turn); err != nil {
+				if isTelegramTopicGoneError(err) {
+					if deleteErr := a.forgetDeletedTelegramTopic(conv); deleteErr != nil {
+						return conv, deleteErr
+					}
+					return conv, errTelegramTopicGone
+				}
 				return conv, err
 			}
 		}
-		return conv, nil
-	}
-	for _, turn := range turns {
-		if a.shouldSkipTelegramOriginTurn(conv.CodexThreadID, turn) {
-			conv.LastSyncedTurnID = turn.ID
-			continue
-		}
-		if err := renderHistoricalTurnSilent(ctx, a.bot, conv.ChatID, conv.MessageThreadID, turn); err != nil {
-			if isTelegramTopicGoneError(err) {
-				if deleteErr := a.forgetDeletedTelegramTopic(conv); deleteErr != nil {
-					return conv, deleteErr
-				}
-				return conv, errTelegramTopicGone
-			}
+		if err := a.store.SetSyncMarker(conv, turn.ID); err != nil {
 			return conv, err
 		}
 		conv.LastSyncedTurnID = turn.ID
-	}
-	if len(turns) > 0 {
-		if err := a.store.Upsert(conv); err != nil {
-			return conv, err
-		}
 	}
 	return conv, nil
 }
@@ -346,29 +328,6 @@ func isMissingCodexRolloutError(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "no rollout found for thread id")
-}
-
-func completedTurnsAfterMarker(turns []codex.Turn, marker string) ([]codex.Turn, bool) {
-	var out []codex.Turn
-	seen := marker == ""
-	for _, turn := range turns {
-		if seen && turn.Status == "completed" {
-			out = append(out, turn)
-		}
-		if turn.ID == marker {
-			seen = true
-		}
-	}
-	return out, seen
-}
-
-func latestCompletedTurnID(turns []codex.Turn) string {
-	for i := len(turns) - 1; i >= 0; i-- {
-		if turns[i].Status == "completed" {
-			return turns[i].ID
-		}
-	}
-	return ""
 }
 
 func conversationKey(chatID int64, messageThreadID int) string {

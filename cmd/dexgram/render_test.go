@@ -42,6 +42,20 @@ func TestRenderTelegramMessagesCodeFenceUsesPreEntity(t *testing.T) {
 	assertEntity(t, got, "pre")
 }
 
+func TestRenderTelegramTableWrapsRowsAndRemovesAppAnnotations(t *testing.T) {
+	input := "| Role | Changes |\n| --- | --- |\n| Example CV :codex-annotation{index=\"1\"} | Updated [draft](https://example.com/draft). |\n| Another role | Added **research**. |\n\nNext step."
+	got := firstRenderedTelegramMessage(stripAssistantAppDirectives(input), 4096)
+	for _, want := range []string{"Example CV", "Updated draft.", "Another role", "Added research.", "Next step."} {
+		assertContains(t, got.Text, want)
+	}
+	if strings.ContainsAny(got.Text, "|") || strings.Contains(got.Text, "codex-annotation") {
+		t.Fatalf("rendered table contains raw Markdown or annotation: %q", got.Text)
+	}
+	assertEntity(t, got, "bold")
+	assertEntity(t, got, "text_link")
+	assertNoEntity(t, got, "pre")
+}
+
 func TestRenderTelegramMessagesDropsInvalidLocalTextLinks(t *testing.T) {
 	got := firstRenderedTelegramMessage("> Desktop prompt\n\nChanged [telegram_handlers.go](C:/Users/Yashau/Projects/dexgram/cmd/dexgram/telegram_handlers.go:140).", 4096)
 

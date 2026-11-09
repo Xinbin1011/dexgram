@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -21,6 +22,8 @@ const (
 	maxSyncTextRunes     = 6000
 )
 
+var inlineCodexAnnotation = regexp.MustCompile(`[ \t]*:codex-annotation\{index="[0-9]+"\}`)
+
 func (a *app) handleSyncCommand(ctx context.Context, b *bot.Bot, msg *models.Message, arg string) {
 	limit, err := parseSyncLimit(arg)
 	if err != nil {
@@ -31,6 +34,9 @@ func (a *app) handleSyncCommand(ctx context.Context, b *bot.Bot, msg *models.Mes
 		})
 		return
 	}
+	key := conversationKey(msg.Chat.ID, msg.MessageThreadID)
+	unlock := a.lockTopicPrompt(key)
+	defer unlock()
 	conv, ok, err := a.store.Get(msg.Chat.ID, msg.MessageThreadID)
 	if err != nil {
 		log.Printf("read conversation for sync: %v", err)
@@ -49,7 +55,10 @@ func (a *app) handleSyncCommand(ctx context.Context, b *bot.Bot, msg *models.Mes
 		})
 		return
 	}
-	conv = a.topicConversation(msg.Chat.ID, msg.MessageThreadID)
+	if a.activeSession(key) != nil {
+		a.sendOrEditPlain(ctx, b, msg.Chat.ID, msg.MessageThreadID, 0, "This Telegram topic has a Codex turn in progress. Try /sync after it finishes.", nil)
+		return
+	}
 	c, err := a.startCodexAppServer(ctx, codex.StartOptions{
 		CLIPath:    a.cfg.Codex.CLIPath,
 		WorkingDir: appServerWorkingDir(conv),
@@ -58,46 +67,32 @@ func (a *app) handleSyncCommand(ctx context.Context, b *bot.Bot, msg *models.Mes
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: msg.Chat.ID, MessageThreadID: msg.MessageThreadID, Text: "Could not start Codex app-server: " + err.Error()})
 		return
 	}
-	resume, err := a.resumeCodexThreadResult(ctx, c, conv.CodexThreadID)
+	history, err := readSyncHistory(ctx, c, conv.CodexThreadID, conv.LastSyncedTurnID, limit)
 	if err != nil {
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: msg.Chat.ID, MessageThreadID: msg.MessageThreadID, Text: "Could not resume Codex thread: " + err.Error()})
+		log.Printf("read Codex history for sync: %v", err)
+		a.sendOrEditPlain(ctx, b, msg.Chat.ID, msg.MessageThreadID, 0, "Could not read saved Codex replies. Try /sync again.", nil)
 		return
 	}
-	thread := resume.Thread
-	if len(thread.Turns) == 0 {
-		var read codex.ThreadReadResponse
-		if err := c.Call(ctx, "thread/read", map[string]any{"threadId": conv.CodexThreadID}, &read); err != nil {
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: msg.Chat.ID, MessageThreadID: msg.MessageThreadID, Text: "Could not read Codex thread: " + err.Error()})
-			return
-		}
-		thread = read.Thread
-	}
-	if len(thread.Turns) == 0 {
+	if history.latest == "" {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: msg.Chat.ID, MessageThreadID: msg.MessageThreadID, Text: "No completed Codex turns to sync."})
 		return
 	}
 
-	turns := unsyncedTurns(thread.Turns, conv.LastSyncedTurnID)
-	if len(turns) == 0 {
+	if len(history.turns) == 0 {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: msg.Chat.ID, MessageThreadID: msg.MessageThreadID, Text: "Already synced."})
 		return
 	}
-	if len(turns) > limit {
-		turns = turns[len(turns)-limit:]
-	}
-	for _, turn := range turns {
-		if a.shouldSkipTelegramOriginTurn(conv.CodexThreadID, turn) {
-			conv.LastSyncedTurnID = turn.ID
-			continue
+	for _, turn := range history.turns {
+		if !a.shouldSkipTelegramOriginTurn(conv.CodexThreadID, turn) {
+			if err := renderHistoricalTurn(ctx, b, msg.Chat.ID, msg.MessageThreadID, turn); err != nil {
+				log.Printf("sync turn render failed chat_id=%d thread_id=%d turn_id=%s: %v", msg.Chat.ID, msg.MessageThreadID, turn.ID, err)
+				return
+			}
 		}
-		if err := renderHistoricalTurn(ctx, b, msg.Chat.ID, msg.MessageThreadID, turn); err != nil {
-			log.Printf("sync turn render failed chat_id=%d thread_id=%d turn_id=%s: %v", msg.Chat.ID, msg.MessageThreadID, turn.ID, err)
+		if err := a.store.SetSyncMarker(conv, turn.ID); err != nil {
+			log.Printf("store sync marker: %v", err)
 			return
 		}
-		conv.LastSyncedTurnID = turn.ID
-	}
-	if err := a.store.Upsert(conv); err != nil {
-		log.Printf("store sync marker: %v", err)
 	}
 }
 
@@ -114,28 +109,6 @@ func parseSyncLimit(arg string) (int, error) {
 		return maxSyncTurnLimit, nil
 	}
 	return n, nil
-}
-
-func unsyncedTurns(turns []codex.Turn, lastID string) []codex.Turn {
-	if lastID == "" {
-		for i := len(turns) - 1; i >= 0; i-- {
-			if turns[i].Status == "completed" {
-				return []codex.Turn{turns[i]}
-			}
-		}
-		return nil
-	}
-	var out []codex.Turn
-	seen := false
-	for _, turn := range turns {
-		if seen && turn.Status == "completed" {
-			out = append(out, turn)
-		}
-		if turn.ID == lastID {
-			seen = true
-		}
-	}
-	return out
 }
 
 func renderHistoricalTurn(ctx context.Context, b *bot.Bot, chatID int64, messageThreadID int, turn codex.Turn) error {
@@ -212,7 +185,7 @@ func stripAssistantAppDirectives(text string) string {
 		if strings.HasPrefix(strings.TrimSpace(line), "::") {
 			continue
 		}
-		out = append(out, line)
+		out = append(out, inlineCodexAnnotation.ReplaceAllString(line, ""))
 	}
 	return strings.TrimSpace(strings.Join(out, "\n"))
 }
