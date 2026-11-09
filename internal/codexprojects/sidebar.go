@@ -48,13 +48,13 @@ func LoadSidebar() (Sidebar, error) {
 	}
 	sidebar, err := readDesktopSidebar(filepath.Join(home, "state_5.sqlite"))
 	if err == nil {
-		readGlobalPins(home, &sidebar)
+		readGlobalSidebar(home, &sidebar)
 		return sidebar, nil
 	}
 	legacy, legacyErr := loadLegacy(home)
 	if legacyErr == nil {
 		sidebar := Sidebar{Projects: legacy}
-		readGlobalPins(home, &sidebar)
+		readGlobalSidebar(home, &sidebar)
 		return sidebar, nil
 	}
 	if errors.Is(err, os.ErrNotExist) && errors.Is(legacyErr, os.ErrNotExist) {
@@ -155,17 +155,43 @@ func readPlacements(db *sql.DB, sidebar *Sidebar) error {
 	return rows.Err()
 }
 
-func readGlobalPins(home string, sidebar *Sidebar) {
+func readGlobalSidebar(home string, sidebar *Sidebar) {
 	data, err := os.ReadFile(filepath.Join(home, ".codex-global-state.json"))
 	if err != nil {
 		return
 	}
 	var desktop struct {
-		Pinned []string                   `json:"pinned-thread-ids"`
-		Atoms  map[string]json.RawMessage `json:"electron-persisted-atom-state"`
+		Pinned             []string                     `json:"pinned-thread-ids"`
+		Atoms              map[string]json.RawMessage   `json:"electron-persisted-atom-state"`
+		MigratedProjects   map[string]map[string]string `json:"app-server-project-id-by-legacy-project-id-by-host"`
+		ThreadProjectHosts map[string]string            `json:"thread-project-membership-host-ids"`
+		ThreadProjects     map[string]struct {
+			Kind string `json:"projectKind"`
+			ID   string `json:"projectId"`
+		} `json:"thread-project-assignments"`
 	}
 	if err := json.Unmarshal(data, &desktop); err != nil {
 		return
+	}
+	localProjects := map[string]bool{}
+	for _, project := range sidebar.Projects {
+		localProjects[project.ID] = project.ID != ""
+	}
+	migrated := desktop.MigratedProjects["local:"+filepath.Clean(home)]
+	for id, project := range desktop.ThreadProjects {
+		place, known := sidebar.Threads[id]
+		host := desktop.ThreadProjectHosts[id]
+		if !known || place.ProjectID != "" || project.Kind != "local" || (host != "" && host != "local") {
+			continue
+		}
+		projectID := project.ID
+		if newID := migrated[projectID]; newID != "" {
+			projectID = newID
+		}
+		if localProjects[projectID] {
+			place.ProjectID = projectID
+			sidebar.Threads[id] = place
+		}
 	}
 	pinned := map[string]bool{}
 	for _, id := range desktop.Pinned {

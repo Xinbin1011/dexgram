@@ -2,6 +2,8 @@ package codexprojects
 
 import (
 	"database/sql"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -41,5 +43,46 @@ func TestReadDesktopSidebar(t *testing.T) {
 	}
 	if len(sidebar.Threads) != 1 || sidebar.Threads["t"] != (Placement{ProjectID: "p", SectionID: "s", SectionPosition: 10, Pinned: true}) {
 		t.Fatalf("wrong placement: %#v", sidebar.Threads)
+	}
+}
+
+func TestReadGlobalSidebarFillsMissingLocalProjectAssignments(t *testing.T) {
+	home := t.TempDir()
+	sidebar := Sidebar{
+		Projects: []Project{{ID: "current"}, {ID: "other"}},
+		Threads: map[string]Placement{
+			"legacy":   {SectionID: "later"},
+			"explicit": {ProjectID: "other"},
+			"remote":   {},
+			"chatgpt":  {},
+		},
+	}
+	state := map[string]any{
+		"app-server-project-id-by-legacy-project-id-by-host": map[string]map[string]string{
+			"local:" + home: {"previous": "current"},
+		},
+		"thread-project-membership-host-ids": map[string]string{"remote": "remote-host"},
+		"thread-project-assignments": map[string]map[string]string{
+			"legacy":   {"projectKind": "local", "projectId": "previous"},
+			"explicit": {"projectKind": "local", "projectId": "previous"},
+			"remote":   {"projectKind": "local", "projectId": "previous"},
+			"chatgpt":  {"projectKind": "chatgpt", "projectId": "previous"},
+		},
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(home, ".codex-global-state.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	readGlobalSidebar(home, &sidebar)
+	if got := sidebar.Threads["legacy"]; got != (Placement{ProjectID: "current", SectionID: "later"}) {
+		t.Fatalf("legacy placement = %#v", got)
+	}
+	for id, want := range map[string]string{"explicit": "other", "remote": "", "chatgpt": ""} {
+		if got := sidebar.Threads[id].ProjectID; got != want {
+			t.Errorf("project for %s = %q, want %q", id, got, want)
+		}
 	}
 }
