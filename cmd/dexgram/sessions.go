@@ -95,7 +95,7 @@ func (a *app) fetchCodexThreads(ctx context.Context, query string) ([]codex.Thre
 	}
 
 	threads, err := fetchThreadListPages(ctx, c, query, true)
-	if err != nil {
+	if err != nil || (len(threads) == 0 && query == "") {
 		threads, err = fetchThreadListPages(ctx, c, query, false)
 		if err != nil {
 			return nil, err
@@ -118,6 +118,8 @@ func fetchThreadListPages(ctx context.Context, c *codex.Client, query string, in
 		params := map[string]any{"limit": sessionListPageSize}
 		if includeSourceKinds {
 			params["sourceKinds"] = []string{"cli", "vscode", "appServer", "exec", "unknown"}
+			// The rollout scan can omit threads already indexed by Codex Desktop.
+			params["useStateDbOnly"] = true
 		}
 		if query != "" {
 			params["searchTerm"] = query
